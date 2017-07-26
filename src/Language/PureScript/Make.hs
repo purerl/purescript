@@ -75,7 +75,6 @@ import Language.PureScript.Parser.Erl
 
 import qualified Language.PureScript.CodeGen.JS as J
 import           Language.PureScript.CodeGen.JS.Printer
-import qualified Language.PureScript.Constants as C
 import qualified Language.PureScript.CoreFn as CF
 import qualified Language.PureScript.CoreFn.ToJSON as CFJ
 import qualified Language.PureScript.CoreImp.AST as Imp
@@ -265,9 +264,6 @@ make ma@MakeActions{..} ms = do
     externs <- decode bs
     guard $ T.unpack (efVersion externs) == showVersion Paths.version
     return externs
-
-importPrim :: Module -> Module
-importPrim = addDefaultImport (ModuleName [ProperName C.prim])
 
 -- | A monad for running make actions
 newtype Make a = Make

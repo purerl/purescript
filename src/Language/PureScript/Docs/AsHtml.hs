@@ -15,10 +15,11 @@ module Language.PureScript.Docs.AsHtml (
 ) where
 
 import Prelude
-import Control.Arrow (second)
 import Control.Category ((>>>))
 import Control.Monad (unless)
 import Data.Char (isUpper)
+import Data.Either (isRight)
+import Data.Maybe (fromMaybe)
 import Data.Monoid ((<>))
 import Data.Foldable (for_)
 import Data.String (fromString)
@@ -29,6 +30,7 @@ import qualified Data.Text as T
 import Text.Blaze.Html5 as H hiding (map)
 import qualified Text.Blaze.Html5.Attributes as A
 import qualified Cheapskate
+import Text.Parsec (eof)
 
 import qualified Language.PureScript as P
 
@@ -68,22 +70,31 @@ nullRenderContext mn = HtmlRenderContext
   , renderSourceLink = const Nothing
   }
 
-packageAsHtml :: (P.ModuleName -> HtmlRenderContext) -> Package a -> HtmlOutput Html
+packageAsHtml
+    :: (InPackage P.ModuleName -> Maybe HtmlRenderContext)
+    -> Package a
+    -> HtmlOutput Html
 packageAsHtml getHtmlCtx Package{..} =
   HtmlOutput indexFile modules
   where
   indexFile = []
-  modules = map (\m -> moduleAsHtml (getHtmlCtx (modName m)) m) pkgModules
+  modules = moduleAsHtml getHtmlCtx <$> pkgModules
 
-moduleAsHtml :: HtmlRenderContext -> Module -> (P.ModuleName, HtmlOutputModule Html)
-moduleAsHtml r Module{..} = (modName, HtmlOutputModule modHtml reexports)
+moduleAsHtml
+    :: (InPackage P.ModuleName -> Maybe HtmlRenderContext)
+    -> Module
+    -> (P.ModuleName, HtmlOutputModule Html)
+moduleAsHtml getR Module{..} = (modName, HtmlOutputModule modHtml reexports)
   where
-  renderDecl = declAsHtml r
   modHtml = do
-    for_ modComments renderMarkdown
-    for_ modDeclarations renderDecl
+    let r = fromMaybe (nullRenderContext modName) $ getR (Local modName)
+     in do
+        for_ modComments renderMarkdown
+        for_ modDeclarations (declAsHtml r)
   reexports =
-    map (second (foldMap renderDecl)) modReExports
+    flip map modReExports $ \(pkg, decls) ->
+        let r = fromMaybe (nullRenderContext modName) $ getR pkg
+         in (pkg, foldMap (declAsHtml r) decls)
 
 -- renderIndex :: LinksContext -> [(Maybe Char, Html)]
 -- renderIndex LinksContext{..} = go ctxBookmarks
@@ -127,6 +138,8 @@ declAsHtml r d@Declaration{..} = do
     h3 ! A.class_ "decl__title clearfix" $ do
       a ! A.class_ "decl__anchor" ! A.href (v declFragment) $ "#"
       H.span $ text declTitle
+      text " " -- prevent browser from treating
+               -- declTitle + linkToSource as one word
       for_ declSourceSpan (linkToSource r)
 
     H.div ! A.class_ "decl__body" $ do
@@ -163,11 +176,16 @@ declAsHtml r d@Declaration{..} = do
 
 renderChildren :: HtmlRenderContext -> [ChildDeclaration] -> Html
 renderChildren _ [] = return ()
-renderChildren r xs = ul $ mapM_ go xs
+renderChildren r xs = ul $ mapM_ item xs
   where
-  go decl = item decl . code . codeAsHtml r . Render.renderChildDeclaration $ decl
-  item decl = let fragment = makeFragment (childDeclInfoNamespace (cdeclInfo decl)) (cdeclTitle decl)
-              in  li ! A.id (v (T.drop 1 fragment))
+  item decl =
+    li ! A.id (v (T.drop 1 (fragment decl))) $ do
+      renderCode decl
+      for_ (cdeclComments decl) $ \coms ->
+        H.div ! A.class_ "decl__child_comments" $ renderMarkdown coms
+
+  fragment decl = makeFragment (childDeclInfoNamespace (cdeclInfo decl)) (cdeclTitle decl)
+  renderCode = code . codeAsHtml r . Render.renderChildDeclaration
 
 codeAsHtml :: HtmlRenderContext -> RenderedCode -> Html
 codeAsHtml r = outputWith elemAsHtml
@@ -183,9 +201,16 @@ codeAsHtml r = outputWith elemAsHtml
       case link_ of
         Link mn ->
           let
-            class_ = if startsWithUpper name then "ctor" else "ident"
+            class_ =
+              if startsWithUpper name then "ctor" else "ident"
+            target
+              | isOp name =
+                  if ns == TypeLevel
+                    then "type (" <> name <> ")"
+                    else "(" <> name <> ")"
+              | otherwise = name
           in
-            linkToDecl ns name mn (withClass class_ (text name))
+            linkToDecl ns target mn (withClass class_ (text name))
         NoLink ->
           text name
 
@@ -196,6 +221,13 @@ codeAsHtml r = outputWith elemAsHtml
     if T.null str
       then False
       else isUpper (T.index str 0)
+
+  isOp = isRight . runParser P.symbol
+
+  runParser :: P.TokenParser a -> Text -> Either String a
+  runParser p' s = either (Left . show) Right $ do
+    ts <- P.lex "" s
+    P.runTokenParser "" (p' <* eof) ts
 
 renderLink :: HtmlRenderContext -> DocLink -> Html -> Html
 renderLink r link_@DocLink{..} =
@@ -293,10 +325,13 @@ withClass className content = H.span ! A.class_ (fromString className) $ content
 partitionChildren ::
   [ChildDeclaration] ->
   ([ChildDeclaration], [ChildDeclaration], [ChildDeclaration])
-partitionChildren = foldl go ([], [], [])
+partitionChildren =
+  reverseAll . foldl go ([], [], [])
   where
   go (instances, dctors, members) rcd =
     case cdeclInfo rcd of
       ChildInstance _ _      -> (rcd : instances, dctors, members)
       ChildDataConstructor _ -> (instances, rcd : dctors, members)
       ChildTypeClassMember _ -> (instances, dctors, rcd : members)
+
+  reverseAll (xs, ys, zs) = (reverse xs, reverse ys, reverse zs)

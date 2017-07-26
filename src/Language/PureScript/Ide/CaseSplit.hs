@@ -23,6 +23,7 @@ module Language.PureScript.Ide.CaseSplit
 
 import           Protolude                     hiding (Constructor)
 
+import qualified Data.Map                      as M
 import qualified Data.Text                     as T
 import qualified Language.PureScript           as P
 
@@ -30,7 +31,6 @@ import           Language.PureScript.Externs
 import           Language.PureScript.Ide.Error
 import           Language.PureScript.Ide.State
 import           Language.PureScript.Ide.Types
-import           Language.PureScript.Ide.Util
 
 import           Text.Parsec                   as Parsec
 import qualified Text.PrettyPrint.Boxes        as Box
@@ -59,7 +59,8 @@ findTypeDeclaration :: (Ide m, MonadError IdeError m) =>
                          P.ProperName 'P.TypeName -> m ExternsDeclaration
 findTypeDeclaration q = do
   efs <- getExternFiles
-  let m = getFirst $ foldMap (findTypeDeclaration' q) efs
+  efs' <- maybe efs (flip (uncurry M.insert) efs) <$> cachedRebuild
+  let m = getFirst $ foldMap (findTypeDeclaration' q) efs'
   case m of
     Just mn -> pure mn
     Nothing -> throwError (GeneralError "Not Found")
@@ -129,8 +130,8 @@ parseTypeDeclaration' s =
         ts <- P.lex "" (toS s)
         P.runTokenParser "" (P.parseDeclaration <* Parsec.eof) ts
   in
-    case unwrapPositioned <$> x of
-      Right (P.TypeDeclaration i t) -> pure (i, t)
+    case x of
+      Right (P.TypeDeclaration _ i t) -> pure (i, t)
       Right _ -> throwError (GeneralError "Found a non-type-declaration")
       Left err ->
         throwError (GeneralError ("Parsing the type signature failed with: "

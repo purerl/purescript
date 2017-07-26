@@ -62,7 +62,7 @@ lintImports (Module _ _ mn mdecls (Just mexports)) env usedImps = do
 
   -- TODO: this needs some work to be easier to understand
 
-  let scope = maybe primImports (\(_, imps', _) -> imps') (M.lookup mn env)
+  let scope = maybe nullImports (\(_, imps', _) -> imps') (M.lookup mn env)
       usedImps' = foldr (elaborateUsed scope) usedImps exportedModules
       numOpenImports = getSum $ foldMap (Sum . countOpenImports) mdecls
       allowImplicit = numOpenImports == 1
@@ -116,7 +116,6 @@ lintImports (Module _ _ mn mdecls (Just mexports)) env usedImps = do
   selfCartesianSubset [] = []
 
   countOpenImports :: Declaration -> Int
-  countOpenImports (PositionedDeclaration _ _ d) = countOpenImports d
   countOpenImports (ImportDeclaration _ mn' Implicit Nothing)
     | not (isPrim mn' || mn == mn') = 1
   countOpenImports (ImportDeclaration _ mn' (Hiding _) Nothing)

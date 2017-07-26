@@ -12,8 +12,7 @@
 -- Interface for the psc-ide-server
 -----------------------------------------------------------------------------
 
-{-# LANGUAGE PackageImports        #-}
-{-# LANGUAGE TemplateHaskell       #-}
+{-# LANGUAGE PackageImports #-}
 
 module Language.PureScript.Ide
        ( handleCommand
@@ -23,6 +22,7 @@ import           Protolude
 
 import           "monad-logger" Control.Monad.Logger
 import qualified Language.PureScript                as P
+import qualified Language.PureScript.Constants      as C
 import qualified Language.PureScript.Ide.CaseSplit  as CS
 import           Language.PureScript.Ide.Command
 import           Language.PureScript.Ide.Completion
@@ -31,6 +31,7 @@ import           Language.PureScript.Ide.Externs
 import           Language.PureScript.Ide.Filter
 import           Language.PureScript.Ide.Imports    hiding (Import)
 import           Language.PureScript.Ide.Matcher
+import           Language.PureScript.Ide.Prim
 import           Language.PureScript.Ide.Pursuit
 import           Language.PureScript.Ide.Rebuild
 import           Language.PureScript.Ide.SourceFile
@@ -43,8 +44,10 @@ import           System.FilePath.Glob (glob)
 
 -- | Accepts a Commmand and runs it against psc-ide's State. This is the main
 -- entry point for the server.
-handleCommand :: (Ide m, MonadLogger m, MonadError IdeError m) =>
-                 Command -> m Success
+handleCommand
+  :: (Ide m, MonadLogger m, MonadError IdeError m)
+  => Command
+  -> m Success
 handleCommand c = case c of
   Load [] ->
     findAvailableExterns >>= loadModulesAsync
@@ -104,13 +107,15 @@ findCompletions
   -> m Success
 findCompletions filters matcher currentModule complOptions = do
   modules <- getAllModules currentModule
-  pure (CompletionResult (getCompletions filters matcher complOptions modules))
+  let insertPrim = (:) (C.Prim, idePrimDeclarations)
+  pure (CompletionResult (getCompletions filters matcher complOptions (insertPrim modules)))
 
 findType :: Ide m =>
             Text -> [Filter] -> Maybe P.ModuleName -> m Success
 findType search filters currentModule = do
   modules <- getAllModules currentModule
-  pure (CompletionResult (getExactCompletions search filters modules))
+  let insertPrim = (:) (C.Prim, idePrimDeclarations)
+  pure (CompletionResult (getExactCompletions search filters (insertPrim modules)))
 
 findPursuitCompletions :: MonadIO m =>
                           PursuitQuery -> m Success
@@ -218,7 +223,7 @@ loadModules moduleNames = do
   (failures, allModules) <-
     partitionEithers <$> (parseModulesFromFiles =<< findAllSourceFiles)
   unless (null failures) $
-    $(logWarn) ("Failed to parse: " <> show failures)
+    logWarnN ("Failed to parse: " <> show failures)
   traverse_ insertModule allModules
 
   pure (TextResult ("Loaded " <> show (length efiles) <> " modules and "

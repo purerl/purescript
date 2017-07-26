@@ -13,10 +13,11 @@ import Control.Arrow (first)
 import Control.Monad.IO.Class (liftIO)
 
 import Data.Foldable
-import Data.List ((\\))
-import Data.Maybe (fromMaybe)
+import Safe (headMay)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Monoid
 import Data.Text (Text)
+import qualified Data.Text.IO as TIO
 import qualified Data.Text as T
 import Data.Time.Clock (getCurrentTime)
 import Data.Version (Version(..))
@@ -74,6 +75,9 @@ data Assertion
   -- | Assert that a particular value declaration exists, and its type
   -- satisfies the given predicate.
   | ValueShouldHaveTypeSignature P.ModuleName Text (ShowFn (P.Type -> Bool))
+  -- | Assert that a particular instance declaration exists under some class or
+  -- type declaration, and that its type satisfies the given predicate.
+  | InstanceShouldHaveTypeSignature P.ModuleName Text Text (ShowFn (P.Type -> Bool))
   -- | Assert that a particular type alias exists, and its corresponding
   -- type, when rendered, matches a given string exactly
   -- fields: module, type synonym name, expected type
@@ -99,7 +103,7 @@ instance Show (ShowFn a) where
 data AssertionFailure
   -- | A declaration was not documented, but should have been
   = NotDocumented P.ModuleName Text
-  -- | A child declaration was not documented, but should have been
+  -- | The expected list of child declarations did not match the actual list
   | ChildrenNotDocumented P.ModuleName Text [Text]
   -- | A declaration was documented, but should not have been
   | Documented P.ModuleName Text
@@ -112,11 +116,11 @@ data AssertionFailure
   -- | A declaration had the wrong "type" (ie, value, type, type class)
   -- Fields: declaration title, expected "type", actual "type".
   | WrongDeclarationType P.ModuleName Text Text Text
-  -- | A value declaration had the wrong type (in the sense of "type
-  -- checking"), eg, because the inferred type was used when the explicit type
-  -- should have been.
+  -- | A declaration had the wrong type (in the sense of "type checking"), eg,
+  -- because the inferred type was used when the explicit type should have
+  -- been.
   -- Fields: module name, declaration name, actual type.
-  | ValueDeclarationWrongType P.ModuleName Text P.Type
+  | DeclarationWrongType P.ModuleName Text P.Type
   -- | A Type synonym has been rendered in an unexpected format
   -- Fields: module name, declaration name, expected rendering, actual rendering
   | TypeSynonymMismatch P.ModuleName Text Text Text
@@ -139,6 +143,14 @@ data AssertionFailure
   | BadLinkLocation P.ModuleName Text Text Docs.LinkLocation Docs.LinkLocation
   deriving (Show)
 
+displayAssertionFailure :: AssertionFailure -> Text
+displayAssertionFailure = \case
+  DeclarationWrongType mn title actual ->
+    P.runModuleName mn <> "." <> title <> " had the wrong type; got " <> T.pack (P.prettyPrintType actual)
+  -- TODO: deal with the other constructors nicely
+  other ->
+    T.pack (show other)
+
 data AssertionResult
   = Pass
   | Fail AssertionFailure
@@ -152,9 +164,9 @@ runAssertion assertion linksCtx Docs.Module{..} =
         Nothing ->
           Fail (NotDocumented mn decl)
         Just actualChildren ->
-          case children \\ actualChildren of
-            [] -> Pass
-            cs -> Fail (ChildrenNotDocumented mn decl cs)
+          if children == actualChildren
+            then Pass
+            else Fail (ChildrenNotDocumented mn decl actualChildren)
 
     ShouldNotBeDocumented mn decl ->
       case findChildren decl (declarationsFor mn) of
@@ -200,11 +212,32 @@ runAssertion assertion linksCtx Docs.Module{..} =
           Docs.ValueDeclaration ty ->
             if tyPredicate ty
               then Pass
-              else Fail
-                (ValueDeclarationWrongType mn decl ty)
+              else Fail (DeclarationWrongType mn decl ty)
           _ ->
             Fail (WrongDeclarationType mn decl "value"
                    (Docs.declInfoToString declInfo))
+
+    InstanceShouldHaveTypeSignature mn parent decl (ShowFn tyPredicate) ->
+      case find ((==) parent . Docs.declTitle) (declarationsFor mn) >>= findTarget of
+        Just ty ->
+          if tyPredicate ty
+            then Pass
+            else Fail (DeclarationWrongType mn decl ty)
+        Nothing ->
+          Fail (NotDocumented mn decl)
+
+      where
+      findTarget =
+        headMay .
+        mapMaybe (extractInstanceType . Docs.cdeclInfo) .
+        filter (\cdecl -> Docs.cdeclTitle cdecl == decl) .
+        Docs.declChildren
+
+      extractInstanceType = \case
+        (Docs.ChildInstance _ ty) ->
+          Just ty
+        _ ->
+          Nothing
 
     TypeSynonymShouldRenderAs mn decl expected ->
       findDecl mn decl $ \Docs.Declaration{..} ->
@@ -294,7 +327,7 @@ runAssertionIO assertion linksCtx mdl = do
   case runAssertion assertion linksCtx mdl of
     Pass -> pure ()
     Fail reason -> do
-      putStrLn ("Failed: " <> show reason)
+      TIO.putStrLn ("Failed: " <> displayAssertionFailure reason)
       exitFailure
 
 testCases :: [(Text, [Assertion])]
@@ -393,6 +426,13 @@ testCases =
       , ValueShouldHaveTypeSignature (n "TypeOpAliases") "test3" (renderedType "forall a b c d. a ~> (b ~> c) ~> d")
       , ValueShouldHaveTypeSignature (n "TypeOpAliases") "test4" (renderedType "forall a b c d. ((a ~> b) ~> c) ~> d")
       , ValueShouldHaveTypeSignature (n "TypeOpAliases") "third" (renderedType "forall a b c. a × b × c -> c")
+
+      , ShouldBeDocumented (n "TypeOpAliases") "Tuple" ["Tuple","showTuple", "testLEither", "testREither"]
+      , ShouldBeDocumented (n "TypeOpAliases") "Either" ["Left", "Right","testLEither", "testREither"]
+      , ShouldBeDocumented (n "TypeOpAliases") "Show" ["show","showTuple"]
+
+      , InstanceShouldHaveTypeSignature (n "TypeOpAliases") "Either" "testLEither" (renderedType "TestL (Either Int (Tuple Int String))")
+      , InstanceShouldHaveTypeSignature (n "TypeOpAliases") "Either" "testREither" (renderedType "TestR (Either (Tuple Int Int) String)")
       ])
 
   , ("DocComments",
@@ -405,6 +445,11 @@ testCases =
 
   , ("Desugar",
       [ ValueShouldHaveTypeSignature (n "Desugar") "test" (renderedType "forall a b. X (a -> b) a -> b")
+      ])
+
+  , ("ChildDeclOrder",
+      [ ShouldBeDocumented (n "ChildDeclOrder") "Two" ["First", "Second", "showTwo", "fooTwo"]
+      , ShouldBeDocumented (n "ChildDeclOrder") "Foo" ["foo1", "foo2", "fooTwo", "fooInt"]
       ])
   ]
 

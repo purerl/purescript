@@ -21,6 +21,7 @@ module Language.PureScript.Ide.State
   , getExternFiles
   , resetIdeState
   , cacheRebuild
+  , cachedRebuild
   , insertExterns
   , insertModule
   , insertExternsSTM
@@ -30,6 +31,7 @@ module Language.PureScript.Ide.State
   -- for tests
   , resolveOperatorsForModule
   , resolveInstances
+  , resolveDataConstructorsForModule
   ) where
 
 import           Protolude
@@ -82,7 +84,7 @@ insertModuleSTM ref (fp, module') =
 getFileState :: Ide m => m IdeFileState
 getFileState = do
   st <- ideStateVar <$> ask
-  fmap ideFileState . liftIO . readTVarIO $ st
+  ideFileState <$> liftIO (readTVarIO st)
 
 -- | STM version of getFileState
 getFileStateSTM :: TVar IdeState -> STM IdeFileState
@@ -93,7 +95,11 @@ getFileStateSTM ref = ideFileState <$> readTVar ref
 getVolatileState :: Ide m => m IdeVolatileState
 getVolatileState = do
   st <- ideStateVar <$> ask
-  fmap ideVolatileState . liftIO . readTVarIO $ st
+  liftIO (atomically (getVolatileStateSTM st))
+
+-- | STM version of getVolatileState
+getVolatileStateSTM :: TVar IdeState -> STM IdeVolatileState
+getVolatileStateSTM st = ideVolatileState <$> readTVar st
 
 -- | Sets the VolatileState inside Ide's state
 setVolatileStateSTM :: TVar IdeState -> IdeVolatileState -> STM ()
@@ -172,14 +178,17 @@ populateVolatileStateSTM
   -> STM (ModuleMap (ReexportResult [IdeDeclarationAnn]))
 populateVolatileStateSTM ref = do
   IdeFileState{fsExterns = externs, fsModules = modules} <- getFileStateSTM ref
+  rebuildCache <- vsCachedRebuild <$> getVolatileStateSTM ref
   let asts = map (extractAstInformation . fst) modules
   let (moduleDeclarations, reexportRefs) = (map fst &&& map snd) (Map.map convertExterns externs)
       results =
-        resolveLocations asts moduleDeclarations
+        moduleDeclarations
+        & map resolveDataConstructorsForModule
+        & resolveLocations asts
         & resolveInstances externs
         & resolveOperators
         & resolveReexports reexportRefs
-  setVolatileStateSTM ref (IdeVolatileState (AstData asts) (map reResolved results) Nothing)
+  setVolatileStateSTM ref (IdeVolatileState (AstData asts) (map reResolved results) rebuildCache)
   pure results
 
 resolveLocations
@@ -306,3 +315,22 @@ resolveOperatorsForModule modules = map (idaDeclaration %~ resolveOperator)
 
 mapIf :: Functor f => (b -> Bool) -> (b -> b) -> f b -> f b
 mapIf p f = map (\x -> if p x then f x else x)
+
+resolveDataConstructorsForModule
+  :: [IdeDeclarationAnn]
+  -> [IdeDeclarationAnn]
+resolveDataConstructorsForModule decls =
+  map (idaDeclaration %~ resolveDataConstructors) decls
+  where
+    resolveDataConstructors :: IdeDeclaration -> IdeDeclaration
+    resolveDataConstructors decl = case decl of
+      IdeDeclType ty ->
+        IdeDeclType (ty & ideTypeDtors .~ fromMaybe [] (Map.lookup (ty^.ideTypeName) dtors))
+      _ ->
+        decl
+
+    dtors =
+      decls
+      & mapMaybe (preview (idaDeclaration._IdeDeclDataConstructor))
+      & foldr (\(IdeDataConstructor name typeName type') ->
+                  Map.insertWith (<>) typeName [(name, type')]) Map.empty
