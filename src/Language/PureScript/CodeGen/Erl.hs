@@ -200,7 +200,7 @@ moduleToErl env (Module _ mn _ _ foreigns decls) foreignExports =
 
   valueToErl' :: Maybe Ident -> Expr Ann -> m Erl
   valueToErl' _ (Literal (pos, _, _, _) l) =
-    maybe id rethrowWithPosition pos $ literalToValueErl l
+    rethrowWithPosition pos $ literalToValueErl l
   valueToErl' _ (Var _ (Qualified (Just (ModuleName [ProperName prim])) (Ident undef))) | prim == C.prim, undef == C.undefined =
     return $ EAtomLiteral $ Atom Nothing C.undefined
   valueToErl' _ (Var _ ident) | isTopLevelBinding ident = return $ EApp (EAtomLiteral $ curriedName $ qualifiedToErl ident) []
