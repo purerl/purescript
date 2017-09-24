@@ -140,18 +140,19 @@ moduleToErl env (Module _ mn _ _ foreigns decls) foreignExports =
   topNonRecToErl _ ident val = do
     erl <- valueToErl val
     let (_, _, _, meta') = extractAnn val
-    let (ident', onlyUC) = case meta' of
-          Just IsTypeClassConstructor -> (identToTypeclassCtor ident, True)
-          _ -> (Atom Nothing $ runIdent ident, False)
+    let ident' = case meta' of
+          Just IsTypeClassConstructor -> identToTypeclassCtor ident
+          _ -> Atom Nothing $ runIdent ident
     let arity = fromMaybe 0 (M.lookup (Qualified (Just mn) ident) arities)
     let vars = map (\m -> "X" <> T.pack (show m)) [ 1..arity ]
-    pure (
-      [ (uncurriedName ident', arity) | arity > 0 || onlyUC ]
-      <> [ (curriedName ident', 0) ],
-
-      [ EFunctionDef (uncurriedName ident') vars $ curriedApp (map EVar vars) erl | arity > 0 || onlyUC ]
-      <> [ EFunctionDef (curriedName ident') [] erl ]
-            )
+    pure
+      ( [ (uncurriedName ident', arity)
+        , (curriedName ident', 0)
+        ]
+      , [ EFunctionDef (uncurriedName ident') vars $ curriedApp (map EVar vars) erl
+        , EFunctionDef (curriedName ident') [] erl
+        ]
+      )
 
   uncurriedName = id
 
