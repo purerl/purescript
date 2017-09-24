@@ -147,10 +147,10 @@ moduleToErl env (Module _ mn _ _ foreigns decls) foreignExports =
     let vars = map (\m -> "X" <> T.pack (show m)) [ 1..arity ]
     pure (
       [ (uncurriedName ident', arity) | arity > 0 || onlyUC ]
-      <> [ (curriedName ident', 0) | not onlyUC ],
+      <> [ (curriedName ident', 0) ],
 
       [ EFunctionDef (uncurriedName ident') vars $ curriedApp (map EVar vars) erl | arity > 0 || onlyUC ]
-      <> [ EFunctionDef (curriedName ident') [] erl | not onlyUC ]
+      <> [ EFunctionDef (curriedName ident') [] erl ]
             )
 
   uncurriedName = id
