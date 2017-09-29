@@ -345,7 +345,8 @@ buildMakeActions outputDir filePathMap foreigns usePrefix =
   getOutputTimestamp :: ModuleName -> Make (Maybe UTCTime)
   getOutputTimestamp mn = do
     let filePath = T.unpack $ runModuleName mn
-        erlFile = outputDir </> filePath </> "index.erl"
+        outputName = T.unpack $ atomModuleName mn PureScriptModule <> ".erl"
+        erlFile = outputDir </> filePath </> outputName
         externsFile = outputDir </> filePath </> "externs.json"
     min <$> getTimestamp erlFile <*> getTimestamp externsFile
 
