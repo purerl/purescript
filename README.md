@@ -4,12 +4,22 @@ A small strongly typed programming language with expressive types that compiles 
 
 This fork is a PureScript backend targetting Erlang source. The [purerl](https://github.com/purerl) organisation hosts ports of some core libraries.
 
-To use it:
+To use it, it is recommended to use [psc-package](https://github.com/purescript/psc-package) and the purerl package sets. In a psc-package project, compile with something like
 ```
-pserlc 'bower_components/*/src/**/*.purs' 'src/**/*.purs'
+psc-package sources | xargs purs 'src/**/*.purs'
+```
+or if using bower:
+```
+purs 'bower_components/purescript-*/src/**/*.purs' 'src/**/*.purs'
+```
+
+Then build and run the Erlang output:
+```
 erlc -o ebin/ output/*/*.erl
-erl -pa ebin -noshell -eval '(main:main())()' -eval 'init:stop()'
+erl -pa ebin -noshell -eval '(main@ps:main@c())()' -eval 'init:stop()'
 ```
+
+See [hello-world](https://github.com/purerl/hello-world/) example.
 
 Erlang/OTP 19 supported, subtle & catastrophic bugs have been observed with earlier versions. If you do try with an earlier version minimum 17 is suggested due to character encoding.
 
@@ -49,7 +59,7 @@ Note that the FFI code for a module must not only be in a file named correctly, 
 
 FFI files *MUST* export explicitly the exact set of identifiers which will be imported by the corresponding PureScript file. The compiler will check these exports and use them to inform codegen.
 
-*Auto-currying*: functions can be defined with any arity. According to the arity of the export (parsed from the export list) `pserlc` will automatically apply to the right number of arguments. By extension, values are exported as a function of arity 0 returning that value.
+*Auto-currying*: functions can be defined with any arity. According to the arity of the export (parsed from the export list) the compiler will automatically apply to the right number of arguments. By extension, values are exported as a function of arity 0 returning that value.
 
 An example:
 
