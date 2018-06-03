@@ -130,16 +130,17 @@ codegenTargets :: Opts.Parser [P.CodegenTarget]
 codegenTargets = Opts.option targetParser $
      Opts.short 'g'
   <> Opts.long "codegen"
-  <> Opts.value [P.JS]
+  <> Opts.value [P.Erl]
   <> Opts.help
       ( "Specifies comma-separated codegen targets to include. "
       <> targetsMessage
-      <> " The default target is 'js', but if this option is used only the targets specified will be used."
+      <> " The default target is 'erl', but if this option is used only the targets specified will be used."
       )
 
 targets :: M.Map String P.CodegenTarget
 targets = M.fromList
   [ ("js", P.JS)
+  , ("erl", P.Erl)
   , ("sourcemaps", P.JSSourceMap)
   , ("corefn", P.CoreFn)
   ]
