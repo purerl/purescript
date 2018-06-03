@@ -1,6 +1,4 @@
-An introductory overview of the compiler is available [here](https://www.youtube.com/watch?v=Y3P1dxqwFiE).
-
-Pull requests are encouraged.
+Pull requests are encouraged, but please open issues before starting to work on something that you intend to make into a PR, so that we can decide if it is a good fit or not.
 
 ## Finding Issues to Work On
 
@@ -10,7 +8,7 @@ If you would like to contribute, please consider the issues in the current miles
 
 Please follow the following guidelines:
 
-- Add at least a test to `examples/passing/` and possibly to `examples/failing/`.
+- Add at least a test to `tests/purs/passing/` and possibly to `tests/purs/failing/`.
 - Build the binaries and libs with `stack build`
 - Make sure that all test suites are passing. Run the test suites with `stack test`.
 - Build the core libraries by running the script in `core-tests`.
@@ -19,15 +17,15 @@ Please follow the following guidelines:
 
 Run all test suites with `stack test`. You will need `npm`, `bower` and `node` on your PATH to run the tests.
 
-To build and run a specific test in `examples/passing/` or `examples/failing/`, execute the following commands.
+You can run individual test suites using `stack test --test-arguments="-p
+PATTERN"` where `PATTERN` is one of `compiler`, `repl`, `ide`, `docs`, `corefn`,
+or `hierarchy`.
 
-``` bash
-# Build
-stack exec purs -- compile 'tests/support/bower_components/purescript-*/src/**/*.purs' examples/blah/Blah.purs
+To build and run a specific test in `tests/purs/passing/` or `tests/purs/failing/`, add test arguments like so:
 
-# Run
-node -e "require('./output/Main/').main()"
-```
+`stack test --fast --test-arguments="-p compiler/**1110.purs*"`
+
+This will run whatever test uses the example file `1110.purs`.
 
 ## Code Review
 

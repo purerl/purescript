@@ -18,11 +18,12 @@ module Language.PureScript.Ide
        ( handleCommand
        ) where
 
-import           Protolude
+import           Protolude hiding (moduleName)
 
 import           "monad-logger" Control.Monad.Logger
+import qualified Data.Map                           as Map
+import qualified Data.Text                          as T
 import qualified Language.PureScript                as P
-import qualified Language.PureScript.Constants      as C
 import qualified Language.PureScript.Ide.CaseSplit  as CS
 import           Language.PureScript.Ide.Command
 import           Language.PureScript.Ide.Completion
@@ -32,14 +33,14 @@ import           Language.PureScript.Ide.Filter
 import           Language.PureScript.Ide.Imports    hiding (Import)
 import           Language.PureScript.Ide.Matcher
 import           Language.PureScript.Ide.Prim
-import           Language.PureScript.Ide.Pursuit
 import           Language.PureScript.Ide.Rebuild
 import           Language.PureScript.Ide.SourceFile
 import           Language.PureScript.Ide.State
 import           Language.PureScript.Ide.Types
 import           Language.PureScript.Ide.Util
+import           Language.PureScript.Ide.Usage (findUsages)
 import           System.Directory (getCurrentDirectory, getDirectoryContents, doesDirectoryExist, doesFileExist)
-import           System.FilePath ((</>))
+import           System.FilePath ((</>), normalise)
 import           System.FilePath.Glob (glob)
 
 -- | Accepts a Commmand and runs it against psc-ide's State. This is the main
@@ -61,10 +62,6 @@ handleCommand c = case c of
     findType search filters currentModule
   Complete filters matcher currentModule complOptions ->
     findCompletions filters matcher currentModule complOptions
-  Pursuit query Package ->
-    findPursuitPackages query
-  Pursuit query Identifier ->
-    findPursuitCompletions query
   List LoadedModules ->
     printModules
   List AvailableModules ->
@@ -75,24 +72,34 @@ handleCommand c = case c of
     caseSplit l b e wca t
   AddClause l wca ->
     MultilineTextResult <$> CS.addClause l wca
+  FindUsages moduleName ident namespace -> do
+    Map.lookup moduleName <$> getAllModules Nothing >>= \case
+      Nothing -> throwError (GeneralError "Module not found")
+      Just decls -> do
+        case find (\d -> namespaceForDeclaration (discardAnn d) == namespace
+                    && identifierFromIdeDeclaration (discardAnn d) == ident) decls of
+          Nothing -> throwError (GeneralError "Declaration not found")
+          Just declaration -> do
+            let sourceModule = fromMaybe moduleName (declaration & _idaAnnotation & _annExportedFrom)
+            UsagesResult . foldMap toList <$> findUsages (discardAnn declaration) sourceModule
   Import fp outfp _ (AddImplicitImport mn) -> do
     rs <- addImplicitImport fp mn
     answerRequest outfp rs
   Import fp outfp _ (AddQualifiedImport mn qual) -> do
     rs <- addQualifiedImport fp mn qual
     answerRequest outfp rs
-  Import fp outfp filters (AddImportForIdentifier ident) -> do
-    rs <- addImportForIdentifier fp ident filters
+  Import fp outfp filters (AddImportForIdentifier ident qual) -> do
+    rs <- addImportForIdentifier fp ident qual filters
     case rs of
       Right rs' -> answerRequest outfp rs'
       Left question ->
         pure (CompletionResult (map (completionFromMatch . simpleExport . map withEmptyAnn) question))
-  Rebuild file ->
-    rebuildFileAsync file
-  RebuildSync file ->
-    rebuildFileSync file
+  Rebuild file actualFile ->
+    rebuildFileAsync file actualFile
+  RebuildSync file actualFile ->
+    rebuildFileSync file actualFile
   Cwd ->
-    TextResult . toS <$> liftIO getCurrentDirectory
+    TextResult . T.pack <$> liftIO getCurrentDirectory
   Reset ->
     resetIdeState $> TextResult "State has been reset."
   Quit ->
@@ -106,26 +113,20 @@ findCompletions
   -> CompletionOptions
   -> m Success
 findCompletions filters matcher currentModule complOptions = do
-  modules <- getAllModules currentModule
-  let insertPrim = (:) (C.Prim, idePrimDeclarations)
+  modules <- Map.toList <$> getAllModules currentModule
+  let insertPrim = (++) idePrimDeclarations
   pure (CompletionResult (getCompletions filters matcher complOptions (insertPrim modules)))
 
-findType :: Ide m =>
-            Text -> [Filter] -> Maybe P.ModuleName -> m Success
+findType
+  :: Ide m
+  => Text
+  -> [Filter]
+  -> Maybe P.ModuleName
+  -> m Success
 findType search filters currentModule = do
-  modules <- getAllModules currentModule
-  let insertPrim = (:) (C.Prim, idePrimDeclarations)
+  modules <- Map.toList <$> getAllModules currentModule
+  let insertPrim = (++) idePrimDeclarations
   pure (CompletionResult (getExactCompletions search filters (insertPrim modules)))
-
-findPursuitCompletions :: MonadIO m =>
-                          PursuitQuery -> m Success
-findPursuitCompletions (PursuitQuery q) =
-  PursuitResult <$> liftIO (searchPursuitForDeclarations q)
-
-findPursuitPackages :: MonadIO m =>
-                       PursuitQuery -> m Success
-findPursuitPackages (PursuitQuery q) =
-  PursuitResult <$> liftIO (findPackagesForModuleIdent q)
 
 printModules :: Ide m => m Success
 printModules = ModuleList . map P.runModuleName <$> getLoadedModulenames
@@ -156,7 +157,7 @@ findAvailableExterns :: (Ide m, MonadError IdeError m) => m [P.ModuleName]
 findAvailableExterns = do
   oDir <- outputDirectory
   unlessM (liftIO (doesDirectoryExist oDir))
-    (throwError (GeneralError "Couldn't locate your output directory."))
+    (throwError (GeneralError $ "Couldn't locate your output directory at: " <> (T.pack (normalise oDir))))
   liftIO $ do
     directories <- getDirectoryContents oDir
     moduleNames <- filterM (containsExterns oDir) directories
@@ -187,14 +188,7 @@ loadModulesAsync
   -> m Success
 loadModulesAsync moduleNames = do
   tr <- loadModules moduleNames
-
-  -- Finally we kick off the worker with @async@ and return the number of
-  -- successfully parsed modules.
-  env <- ask
-  let ll = confLogLevel (ideConfiguration env)
-  -- populateVolatileState return Unit for now, so it's fine to discard this
-  -- result. We might want to block on this in a benchmarking situation.
-  _ <- liftIO (async (runLogger ll (runReaderT populateVolatileState env)))
+  _ <- populateVolatileState
   pure tr
 
 loadModulesSync
@@ -203,7 +197,7 @@ loadModulesSync
   -> m Success
 loadModulesSync moduleNames = do
   tr <- loadModules moduleNames
-  populateVolatileState
+  populateVolatileStateSync
   pure tr
 
 loadModules

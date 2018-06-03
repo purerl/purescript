@@ -70,7 +70,7 @@ moduleToErl :: forall m .
   -> Module Ann
   -> [(T.Text, Int)]
   -> m ([T.Text], [Erl])
-moduleToErl env (Module _ mn _ _ foreigns decls) foreignExports =
+moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports =
   rethrow (addHint (ErrorInModule mn)) $ do
     res <- traverse topBindToErl decls
     let (exports, erlDecls) = biconcat $ res <> map reExportForeign foreigns
@@ -101,8 +101,8 @@ moduleToErl env (Module _ mn _ _ foreigns decls) foreignExports =
   arities :: M.Map (Qualified Ident) Int
   arities = M.map (\(t, _, _) -> tyArity t) $ E.names env
 
-  reExportForeign :: (Ident, Type) -> ([(Atom,Int)], [Erl])
-  reExportForeign (ident, _) =
+  reExportForeign :: Ident -> ([(Atom,Int)], [Erl])
+  reExportForeign ident =
     let arity = exportArity ident
         fullArity = fromMaybe 0 (M.lookup (Qualified (Just mn) ident) arities)
         args = map (\m -> "X" <> T.pack (show m)) [ 1..fullArity ]
@@ -120,12 +120,12 @@ moduleToErl env (Module _ mn _ _ foreigns decls) foreignExports =
   exportArity :: Ident -> Int
   exportArity ident = fromMaybe 0 $ findExport $ runIdent ident
 
-  checkExport :: (Ident, Type) -> m ()
-  checkExport (ident,ty) =
-    case (findExport (runIdent ident), tyArity ty) of
-      (Just m, n) | m > n ->
-        throwError . errorMessage $ InvalidFFIArity mn (runIdent ident) m n
-      (Nothing, _) ->
+  checkExport :: Ident -> m ()
+  checkExport ident =
+    case findExport (runIdent ident) of -- TODO (, tyArity ty)
+      -- (Just m, n) | m > n ->
+      --   throwError . errorMessage $ InvalidFFIArity mn (runIdent ident) m n
+      Nothing ->
         throwError . errorMessage $ MissingFFIImplementations mn [ident]
       _ -> pure ()
 

@@ -182,7 +182,8 @@ inlineCommonOperators = applyAll
   binary dict fns op = everywhereOnErl convert
     where
     convert :: Erl -> Erl
-    convert (EApp (EApp (EApp fn [dict']) [x]) [y]) | isDict dict dict' && isFn fns fn = EBinary op x y
+    -- TODO compiling
+    -- convert (EApp (EApp (EApp fn [dict']) [x]) [y]) | isDict dict dict' && isFn fns fn = EBinary op x y
     convert other = other
 --   binary' :: Text -> Text -> BinaryOperator -> JS -> JS
 --   binary' moduleName opText op = everywhereOnJS convert
@@ -194,7 +195,8 @@ inlineCommonOperators = applyAll
   unary dicts fns op = everywhereOnErl convert
     where
     convert :: Erl -> Erl
-    convert (EApp (EApp fn [dict']) [x]) | isDict dicts dict' && isFn fns fn = EUnary op x
+    -- TODO compiling
+    -- convert (EApp (EApp fn [dict']) [x]) | isDict dicts dict' && isFn fns fn = EUnary op x
     convert other = other
 --   unary' :: Text -> Text -> UnaryOperator -> JS -> JS
 --   unary' moduleName fnName op = everywhereOnJS convert

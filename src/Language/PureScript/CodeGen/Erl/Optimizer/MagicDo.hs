@@ -2,9 +2,11 @@
 -- This module implements the "Magic Do" optimization, which inlines calls to return
 -- and bind for the Eff monad, as well as some of its actions.
 --
-module Language.PureScript.CodeGen.Erl.Optimizer.MagicDo (magicDo) where
+module Language.PureScript.CodeGen.Erl.Optimizer.MagicDo (magicDo, magicDo') where
 
 import Prelude.Compat
+
+import Data.Text (Text)
 
 import Language.PureScript.CodeGen.Erl.AST
 import Language.PureScript.CodeGen.Erl.Optimizer.Common
@@ -13,7 +15,13 @@ import qualified Language.PureScript.Constants as C
 import qualified Language.PureScript.CodeGen.Erl.Constants as EC
 
 magicDo :: Erl -> Erl
-magicDo = everywhereOnErl undo . everywhereOnErlTopDown convert
+magicDo = magicDo'' C.eff C.effDictionaries
+
+magicDo' :: Erl -> Erl
+magicDo' = magicDo'' C.effect C.effectDictionaries
+
+magicDo'' :: Text -> C.EffectDictionaries -> Erl -> Erl
+magicDo'' effectModule C.EffectDictionaries{..} = everywhereOnErl undo . everywhereOnErlTopDown convert
   where
   -- The name of the function block which is added to denote a do block
   fnName = "__do"
@@ -36,10 +44,10 @@ magicDo = everywhereOnErl undo . everywhereOnErlTopDown convert
 
   convert other = other
   -- Check if an expression represents a monomorphic call to >>= for the Eff monad
-  isBind (EApp fn [dict]) | isDict (EC.eff, C.bindEffDictionary) dict && isBindPoly fn = True
+  isBind (EApp fn [dict]) | isDict (effectModule, edBindDict) dict && isBindPoly fn = True
   isBind _ = False
   -- Check if an expression represents a monomorphic call to pure or return for the Eff applicative
-  isPure (EApp fn [dict]) | isDict (EC.eff, C.applicativeEffDictionary) dict && isPurePoly fn = True
+  isPure (EApp fn [dict]) | isDict (effectModule, edApplicativeDict) dict && isPurePoly fn = True
   isPure _ = False
   -- Check if an expression represents the polymorphic >>= function
   isBindPoly = isFn (EC.controlBind, C.bind)

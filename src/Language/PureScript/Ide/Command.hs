@@ -38,10 +38,6 @@ data Command
       , completeCurrentModule :: Maybe P.ModuleName
       , completeOptions       :: CompletionOptions
       }
-    | Pursuit
-      { pursuitQuery      :: PursuitQuery
-      , pursuitSearchType :: PursuitSearchType
-      }
     | CaseSplit
       { caseSplitLine        :: Text
       , caseSplitBegin       :: Int
@@ -53,11 +49,16 @@ data Command
       { addClauseLine        :: Text
       , addClauseAnnotations :: WildcardAnnotations
       }
+    | FindUsages
+      { usagesModule :: P.ModuleName
+      , usagesIdentifier :: Text
+      , usagesNamespace :: IdeNamespace
+      }
       -- Import InputFile OutputFile
     | Import FilePath (Maybe FilePath) [Filter] ImportCommand
     | List { listType :: ListType }
-    | Rebuild FilePath -- ^ Rebuild the specified file using the loaded externs
-    | RebuildSync FilePath -- ^ Rebuild the specified file using the loaded externs
+    | Rebuild FilePath (Maybe FilePath)
+    | RebuildSync FilePath (Maybe FilePath)
     | Cwd
     | Reset
     | Quit
@@ -68,9 +69,9 @@ commandName c = case c of
   LoadSync{} -> "LoadSync"
   Type{} -> "Type"
   Complete{} -> "Complete"
-  Pursuit{} -> "Pursuit"
   CaseSplit{} -> "CaseSplit"
   AddClause{} -> "AddClause"
+  FindUsages{} -> "FindUsages"
   Import{} -> "Import"
   List{} -> "List"
   Rebuild{} -> "Rebuild"
@@ -82,7 +83,7 @@ commandName c = case c of
 data ImportCommand
   = AddImplicitImport P.ModuleName
   | AddQualifiedImport P.ModuleName P.ModuleName
-  | AddImportForIdentifier Text
+  | AddImportForIdentifier Text (Maybe P.ModuleName)
   deriving (Show, Eq)
 
 instance FromJSON ImportCommand where
@@ -96,7 +97,10 @@ instance FromJSON ImportCommand where
           <$> (P.moduleNameFromString <$> o .: "module")
           <*> (P.moduleNameFromString <$> o .: "qualifier")
       "addImport" ->
-        AddImportForIdentifier <$> o .: "identifier"
+        AddImportForIdentifier
+          <$> (o .: "identifier")
+          <*> (fmap P.moduleNameFromString <$> o .:? "qualifier")
+
       _ -> mzero
 
 data ListType = LoadedModules | Imports FilePath | AvailableModules
@@ -128,7 +132,7 @@ instance FromJSON Command where
         params <- o .: "params"
         Type
           <$> params .: "search"
-          <*> params .: "filters"
+          <*> params .:? "filters" .!= []
           <*> (fmap P.moduleNameFromString <$> params .:? "currentModule")
       "complete" -> do
         params <- o .: "params"
@@ -137,11 +141,6 @@ instance FromJSON Command where
           <*> params .:? "matcher" .!= mempty
           <*> (fmap P.moduleNameFromString <$> params .:? "currentModule")
           <*> params .:? "options" .!= defaultCompletionOptions
-      "pursuit" -> do
-        params <- o .: "params"
-        Pursuit
-          <$> params .: "query"
-          <*> params .: "type"
       "caseSplit" -> do
         params <- o .: "params"
         CaseSplit
@@ -155,6 +154,12 @@ instance FromJSON Command where
         AddClause
           <$> params .: "line"
           <*> (mkAnnotations <$> params .: "annotations")
+      "usages" -> do
+        params <- o .: "params"
+        FindUsages
+          <$> (map P.moduleNameFromString (params .: "module"))
+          <*> params .: "identifier"
+          <*> params .: "namespace"
       "import" -> do
         params <- o .: "params"
         Import
@@ -166,6 +171,7 @@ instance FromJSON Command where
         params <- o .: "params"
         Rebuild
           <$> params .: "file"
+          <*> params .:? "actualFile"
       _ -> mzero
     where
       mkAnnotations True = explicitAnnotations

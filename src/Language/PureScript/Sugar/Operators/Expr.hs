@@ -2,6 +2,7 @@ module Language.PureScript.Sugar.Operators.Expr where
 
 import Prelude.Compat
 
+import Control.Monad.Except
 import Data.Functor.Identity
 
 import qualified Text.Parsec as P
@@ -10,8 +11,13 @@ import qualified Text.Parsec.Expr as P
 import Language.PureScript.AST
 import Language.PureScript.Names
 import Language.PureScript.Sugar.Operators.Common
+import Language.PureScript.Errors
 
-matchExprOperators :: [[(Qualified (OpName 'ValueOpName), Associativity)]] -> Expr -> Expr
+matchExprOperators
+  :: MonadError MultipleErrors m
+  => [[(Qualified (OpName 'ValueOpName), Associativity)]]
+  -> Expr
+  -> m Expr
 matchExprOperators = matchOperators isBinOp extractOp fromOp reapply modOpTable
   where
 
@@ -25,12 +31,12 @@ matchExprOperators = matchOperators isBinOp extractOp fromOp reapply modOpTable
     | otherwise = Just (op, l, r)
   extractOp _ = Nothing
 
-  fromOp :: Expr -> Maybe (Qualified (OpName 'ValueOpName))
-  fromOp (Op q@(Qualified _ (OpName _))) = Just q
+  fromOp :: Expr -> Maybe (SourceSpan, Qualified (OpName 'ValueOpName))
+  fromOp (Op ss q@(Qualified _ (OpName _))) = Just (ss, q)
   fromOp _ = Nothing
 
-  reapply :: Qualified (OpName 'ValueOpName) -> Expr -> Expr -> Expr
-  reapply op t1 = App (App (Op op) t1)
+  reapply :: SourceSpan -> Qualified (OpName 'ValueOpName) -> Expr -> Expr -> Expr
+  reapply ss op t1 = App (App (Op ss op) t1)
 
   modOpTable
     :: [[P.Operator (Chain Expr) () Identity Expr]]
@@ -42,5 +48,5 @@ matchExprOperators = matchOperators isBinOp extractOp fromOp reapply modOpTable
   parseTicks :: P.Parsec (Chain Expr) () Expr
   parseTicks = token (either (const Nothing) fromOther) P.<?> "infix function"
     where
-    fromOther (Op _) = Nothing
+    fromOther (Op _ _) = Nothing
     fromOther v = Just v

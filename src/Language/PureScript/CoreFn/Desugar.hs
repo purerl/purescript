@@ -39,7 +39,7 @@ moduleToCoreFn env (A.Module modSS coms mn decls (Just exps)) =
       exps' = ordNub $ concatMap exportToCoreFn exps
       externs = ordNub $ mapMaybe externToCoreFn decls
       decls' = concatMap declToCoreFn decls
-  in Module coms mn imports' exps' externs decls'
+  in Module modSS coms mn (spanName modSS) imports' exps' externs decls'
 
   where
 
@@ -63,7 +63,7 @@ moduleToCoreFn env (A.Module modSS coms mn decls (Just exps)) =
       in NonRec (ssA ss) (properToIdent ctor) $ Constructor (ss, com, Nothing, Nothing) tyName ctor fields
   declToCoreFn (A.DataBindingGroupDeclaration ds) =
     concatMap declToCoreFn ds
-  declToCoreFn (A.ValueDeclaration (ss, com) name _ _ [A.MkUnguarded e]) =
+  declToCoreFn (A.ValueDecl (ss, com) name _ _ [A.MkUnguarded e]) =
     [NonRec (ssA ss) name (exprToCoreFn ss com Nothing e)]
   declToCoreFn (A.BindingGroupDeclaration ds) =
     [Rec . NEL.toList $ fmap (\(((ss, com), name), _, e) -> ((ssA ss, name), exprToCoreFn ss com Nothing e)) ds]
@@ -73,19 +73,19 @@ moduleToCoreFn env (A.Module modSS coms mn decls (Just exps)) =
 
   -- | Desugars expressions from AST to CoreFn representation.
   exprToCoreFn :: SourceSpan -> [Comment] -> Maybe Type -> A.Expr -> Expr Ann
-  exprToCoreFn ss com ty (A.Literal lit) =
+  exprToCoreFn _ com ty (A.Literal ss lit) =
     Literal (ss, com, ty, Nothing) (fmap (exprToCoreFn ss com Nothing) lit)
   exprToCoreFn ss com ty (A.Accessor name v) =
     Accessor (ss, com, ty, Nothing) name (exprToCoreFn ss [] Nothing v)
   exprToCoreFn ss com ty (A.ObjectUpdate obj vs) =
     ObjectUpdate (ss, com, ty, Nothing) (exprToCoreFn ss [] Nothing obj) $ fmap (second (exprToCoreFn ss [] Nothing)) vs
-  exprToCoreFn ss com ty (A.Abs (A.VarBinder name) v) =
+  exprToCoreFn ss com ty (A.Abs (A.VarBinder _ name) v) =
     Abs (ss, com, ty, Nothing) name (exprToCoreFn ss [] Nothing v)
   exprToCoreFn _ _ _ (A.Abs _ _) =
     internalError "Abs with Binder argument was not desugared before exprToCoreFn mn"
   exprToCoreFn ss com ty (A.App v1 v2) =
     App (ss, com, ty, Nothing) (exprToCoreFn ss [] Nothing v1) (exprToCoreFn ss [] Nothing v2)
-  exprToCoreFn ss com ty (A.Var ident) =
+  exprToCoreFn _ com ty (A.Var ss ident) =
     Var (ss, com, ty, getValueMeta ident) ident
   exprToCoreFn ss com ty (A.IfThenElse v1 v2 v3) =
     Case (ss, com, ty, Nothing) [exprToCoreFn ss [] Nothing v1]
@@ -93,17 +93,17 @@ moduleToCoreFn env (A.Module modSS coms mn decls (Just exps)) =
                         (Right $ exprToCoreFn ss [] Nothing v2)
       , CaseAlternative [NullBinder (ssAnn ss)]
                         (Right $ exprToCoreFn ss [] Nothing v3) ]
-  exprToCoreFn ss com ty (A.Constructor name) =
+  exprToCoreFn _ com ty (A.Constructor ss name) =
     Var (ss, com, ty, Just $ getConstructorMeta name) $ fmap properToIdent name
   exprToCoreFn ss com ty (A.Case vs alts) =
     Case (ss, com, ty, Nothing) (fmap (exprToCoreFn ss [] Nothing) vs) (fmap (altToCoreFn ss) alts)
   exprToCoreFn ss com _ (A.TypedValue _ v ty) =
     exprToCoreFn ss com (Just ty) v
-  exprToCoreFn ss com ty (A.Let ds v) =
-    Let (ss, com, ty, Nothing) (concatMap declToCoreFn ds) (exprToCoreFn ss [] Nothing v)
-  exprToCoreFn ss com ty (A.TypeClassDictionaryConstructorApp name (A.TypedValue _ lit@(A.Literal (A.ObjectLiteral _)) _)) =
+  exprToCoreFn ss com ty (A.Let w ds v) =
+    Let (ss, com, ty, getLetMeta w) (concatMap declToCoreFn ds) (exprToCoreFn ss [] Nothing v)
+  exprToCoreFn ss com ty (A.TypeClassDictionaryConstructorApp name (A.TypedValue _ lit@(A.Literal _ (A.ObjectLiteral _)) _)) =
     exprToCoreFn ss com ty (A.TypeClassDictionaryConstructorApp name lit)
-  exprToCoreFn ss com _ (A.TypeClassDictionaryConstructorApp name (A.Literal (A.ObjectLiteral vs))) =
+  exprToCoreFn ss com _ (A.TypeClassDictionaryConstructorApp name (A.Literal _ (A.ObjectLiteral vs))) =
     let args = fmap (exprToCoreFn ss [] Nothing . snd) $ sortBy (compare `on` fst) vs
         ctor = Var (ss, [], Nothing, Just IsTypeClassConstructor) (fmap properToIdent name)
     in foldl (App (ss, com, Nothing, Nothing)) ctor args
@@ -133,16 +133,16 @@ moduleToCoreFn env (A.Module modSS coms mn decls (Just exps)) =
 
   -- | Desugars case binders from AST to CoreFn representation.
   binderToCoreFn :: SourceSpan -> [Comment] -> A.Binder -> Binder Ann
-  binderToCoreFn ss com (A.LiteralBinder lit) =
+  binderToCoreFn _ com (A.LiteralBinder ss lit) =
     LiteralBinder (ss, com, Nothing, Nothing) (fmap (binderToCoreFn ss com) lit)
   binderToCoreFn ss com A.NullBinder =
     NullBinder (ss, com, Nothing, Nothing)
-  binderToCoreFn ss com (A.VarBinder name) =
+  binderToCoreFn _ com (A.VarBinder ss name) =
     VarBinder (ss, com, Nothing, Nothing) name
-  binderToCoreFn ss com (A.ConstructorBinder dctor@(Qualified mn' _) bs) =
+  binderToCoreFn _ com (A.ConstructorBinder ss dctor@(Qualified mn' _) bs) =
     let (_, tctor, _, _) = lookupConstructor env dctor
     in ConstructorBinder (ss, com, Nothing, Just $ getConstructorMeta dctor) (Qualified mn' tctor) dctor (fmap (binderToCoreFn ss []) bs)
-  binderToCoreFn ss com (A.NamedBinder name b) =
+  binderToCoreFn _ com (A.NamedBinder ss name b) =
     NamedBinder (ss, com, Nothing, Nothing) name (binderToCoreFn ss [] b)
   binderToCoreFn _ com (A.PositionedBinder ss com1 b) =
     binderToCoreFn ss (com ++ com1) b
@@ -154,6 +154,11 @@ moduleToCoreFn env (A.Module modSS coms mn decls (Just exps)) =
     internalError "BinaryNoParensBinder should have been desugared before binderToCoreFn"
   binderToCoreFn _ _ A.ParensInBinder{} =
     internalError "ParensInBinder should have been desugared before binderToCoreFn"
+
+  -- | Gets metadata for let bindings.
+  getLetMeta :: A.WhereProvenance -> Maybe Meta
+  getLetMeta A.FromWhere = Just IsWhere
+  getLetMeta A.FromLet = Nothing
 
   -- | Gets metadata for values.
   getValueMeta :: Qualified Ident -> Maybe Meta
@@ -192,14 +197,14 @@ findQualModules decls =
   in f `concatMap` decls
   where
   fqDecls :: A.Declaration -> [ModuleName]
-  fqDecls (A.TypeInstanceDeclaration _ _ _ q _ _) = getQual' q
+  fqDecls (A.TypeInstanceDeclaration _ _ _ _ _ q _ _) = getQual' q
   fqDecls (A.ValueFixityDeclaration _ _ q _) = getQual' q
   fqDecls (A.TypeFixityDeclaration _ _ q _) = getQual' q
   fqDecls _ = []
 
   fqValues :: A.Expr -> [ModuleName]
-  fqValues (A.Var q) = getQual' q
-  fqValues (A.Constructor q) = getQual' q
+  fqValues (A.Var _ q) = getQual' q
+  fqValues (A.Constructor _ q) = getQual' q
   -- Some instances are automatically solved and have their class dictionaries
   -- built inline instead of having a named instance defined and imported.
   -- We therefore need to import these constructors if they aren't already.
@@ -207,7 +212,7 @@ findQualModules decls =
   fqValues _ = []
 
   fqBinders :: A.Binder -> [ModuleName]
-  fqBinders (A.ConstructorBinder q _) = getQual' q
+  fqBinders (A.ConstructorBinder _ q _) = getQual' q
   fqBinders _ = []
 
   getQual' :: Qualified a -> [ModuleName]
@@ -219,8 +224,8 @@ importToCoreFn (A.ImportDeclaration (ss, com) name _ _) = Just ((ss, com, Nothin
 importToCoreFn _ = Nothing
 
 -- | Desugars foreign declarations from AST to CoreFn representation.
-externToCoreFn :: A.Declaration -> Maybe ForeignDecl
-externToCoreFn (A.ExternDeclaration _ name ty) = Just (name, ty)
+externToCoreFn :: A.Declaration -> Maybe Ident
+externToCoreFn (A.ExternDeclaration _ name _) = Just name
 externToCoreFn _ = Nothing
 
 -- | Desugars export declarations references from AST to CoreFn representation.

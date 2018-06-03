@@ -1,11 +1,12 @@
 -- | This module implements the "Magic Do" optimization, which inlines calls to return
 -- and bind for the Eff monad, as well as some of its actions.
-module Language.PureScript.CoreImp.Optimizer.MagicDo (magicDo) where
+module Language.PureScript.CoreImp.Optimizer.MagicDo (magicDo, magicDo', inlineST) where
 
 import Prelude.Compat
 import Protolude (ordNub)
 
 import Data.Maybe (fromJust, isJust)
+import Data.Text (Text)
 
 import Language.PureScript.CoreImp.AST
 import Language.PureScript.CoreImp.Optimizer.Common
@@ -27,7 +28,13 @@ import qualified Language.PureScript.Constants as C
 --    ...
 --  }
 magicDo :: AST -> AST
-magicDo = inlineST . everywhere undo . everywhereTopDown convert
+magicDo = magicDo'' C.eff C.effDictionaries
+
+magicDo' :: AST -> AST
+magicDo' = magicDo'' C.effect C.effectDictionaries
+
+magicDo'' :: Text -> C.EffectDictionaries -> AST -> AST
+magicDo'' effectModule C.EffectDictionaries{..} = everywhereTopDown convert
   where
   -- The name of the function block which is added to denote a do block
   fnName = "__do"
@@ -47,18 +54,23 @@ magicDo = inlineST . everywhere undo . everywhereTopDown convert
   -- Desugar whileE
   convert (App _ (App _ (App s1 f [arg1]) [arg2]) []) | isEffFunc C.whileE f =
     App s1 (Function s1 Nothing [] (Block s1 [ While s1 (App s1 arg1 []) (Block s1 [ App s1 arg2 [] ]), Return s1 $ ObjectLiteral s1 []])) []
+  -- Inline __do returns
+  convert (Return _ (App _ (Function _ (Just ident) [] body) [])) | ident == fnName = body
+  -- Inline double applications
+  convert (App _ (App s1 (Function s2 Nothing [] (Block ss body)) []) []) =
+    App s1 (Function s2 Nothing [] (Block ss (applyReturns `fmap` body))) []
   convert other = other
   -- Check if an expression represents a monomorphic call to >>= for the Eff monad
-  isBind (App _ fn [dict]) | isDict (C.eff, C.bindEffDictionary) dict && isBindPoly fn = True
+  isBind (App _ fn [dict]) | isDict (effectModule, edBindDict) dict && isBindPoly fn = True
   isBind _ = False
   -- Check if an expression represents a call to @discard@
   isDiscard (App _ (App _ fn [dict1]) [dict2])
     | isDict (C.controlBind, C.discardUnitDictionary) dict1 &&
-      isDict (C.eff, C.bindEffDictionary) dict2 &&
+      isDict (effectModule, edBindDict) dict2 &&
       isDiscardPoly fn = True
   isDiscard _ = False
   -- Check if an expression represents a monomorphic call to pure or return for the Eff applicative
-  isPure (App _ fn [dict]) | isDict (C.eff, C.applicativeEffDictionary) dict && isPurePoly fn = True
+  isPure (App _ fn [dict]) | isDict (effectModule, edApplicativeDict) dict && isPurePoly fn = True
   isPure _ = False
   -- Check if an expression represents the polymorphic >>= function
   isBindPoly = isDict (C.controlBind, C.bind)
@@ -66,14 +78,9 @@ magicDo = inlineST . everywhere undo . everywhereTopDown convert
   isPurePoly = isDict (C.controlApplicative, C.pure')
   -- Check if an expression represents the polymorphic discard function
   isDiscardPoly = isDict (C.controlBind, C.discard)
-  -- Check if an expression represents a function in the Eff module
-  isEffFunc name (Indexer _ (StringLiteral _ name') (Var _ eff)) = eff == C.eff && name == name'
+  -- Check if an expression represents a function in the Effect module
+  isEffFunc name (Indexer _ (StringLiteral _ name') (Var _ eff)) = eff == effectModule && name == name'
   isEffFunc _ _ = False
-
-  -- Remove __do function applications which remain after desugaring
-  undo :: AST -> AST
-  undo (Return _ (App _ (Function _ (Just ident) [] body) [])) | ident == fnName = body
-  undo other = other
 
   applyReturns :: AST -> AST
   applyReturns (Return ss ret) = Return ss (App ss ret [])

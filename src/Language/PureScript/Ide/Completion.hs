@@ -9,7 +9,7 @@ module Language.PureScript.Ide.Completion
        , applyCompletionOptions
        ) where
 
-import           Protolude
+import           Protolude hiding ((<&>), moduleName)
 
 import           Control.Lens hiding ((&), op)
 import           Data.Aeson
@@ -130,7 +130,7 @@ completionFromMatch (Match (m, IdeDeclarationAnn ann decl), mns) =
 
     complLocation = _annLocation ann
 
-    complDocumentation = Nothing
+    complDocumentation = _annDocumentation ann
 
     showFixity p a r o =
       let asso = case a of

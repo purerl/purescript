@@ -425,7 +425,8 @@ data LinkLocation
 
   -- | A link to a declaration that is built in to the compiler, e.g. the Prim
   -- module. In this case we only need to store the module that the builtin
-  -- comes from (at the time of writing, this will only ever be "Prim").
+  -- comes from. Note that all builtin modules begin with "Prim", and that the
+  -- compiler rejects attempts to define modules whose names start with "Prim".
   | BuiltinModule P.ModuleName
   deriving (Show, Eq, Ord, Generic)
 
@@ -458,11 +459,12 @@ getLink LinksContext{..} curMn namespace target containingMod = do
             pkgVersion <- lookup pkgName ctxResolvedDependencies
             return $ DepsModule curMn pkgName pkgVersion destMn
 
-  builtinLinkLocation = do
-    let primMn = P.moduleNameFromString "Prim"
-    guard $ containingMod == OtherModule primMn
-    -- TODO: ensure the declaration exists in the builtin module too
-    return $ BuiltinModule primMn
+  builtinLinkLocation =
+    case containingMod of
+      OtherModule mn | P.isBuiltinModuleName mn ->
+        pure $ BuiltinModule mn
+      _ ->
+        empty
 
 getLinksContext :: Package a -> LinksContext
 getLinksContext Package{..} =
@@ -488,7 +490,7 @@ asPackage :: Version -> (forall e. Parse e a) -> Parse PackageError (Package a)
 asPackage minimumVersion uploader = do
   -- If the compilerVersion key is missing, we can be sure that it was produced
   -- with 0.7.0.0, since that is the only released version that included the
-  -- psc-publish tool before this key was added.
+  -- `psc-publish` tool (now `purs publish`) before this key was added.
   compilerVersion <- keyOrDefault "compilerVersion" (Version [0,7,0,0] []) asVersion
   when (compilerVersion < minimumVersion)
     (throwCustomError $ CompilerTooOld minimumVersion compilerVersion)

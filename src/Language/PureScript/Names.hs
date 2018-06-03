@@ -1,5 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE DeriveFoldable #-}
 
 -- |
 -- Data types for names
@@ -44,6 +46,10 @@ getTypeName :: Name -> Maybe (ProperName 'TypeName)
 getTypeName (TyName name) = Just name
 getTypeName _ = Nothing
 
+getKindName :: Name -> Maybe (ProperName 'KindName)
+getKindName (KiName name) = Just name
+getKindName _ = Nothing
+
 getTypeOpName :: Name -> Maybe (OpName 'TypeOpName)
 getTypeOpName (TyOpName name) = Just name
 getTypeOpName _ = Nothing
@@ -72,6 +78,10 @@ data Ident
   -- A generated name for an identifier
   --
   | GenIdent (Maybe Text) Integer
+  -- |
+  -- A generated name used only for type-checking
+  --
+  | UnusedIdent
   deriving (Show, Eq, Ord, Generic)
 
 instance NFData Ident
@@ -80,6 +90,7 @@ runIdent :: Ident -> Text
 runIdent (Ident i) = i
 runIdent (GenIdent Nothing n) = "$" <> T.pack (show n)
 runIdent (GenIdent (Just name) n) = "$" <> name <> T.pack (show n)
+runIdent UnusedIdent = "$__unused"
 
 showIdent :: Ident -> Text
 showIdent = runIdent
@@ -110,7 +121,10 @@ showOp op = "(" <> runOpName op <> ")"
 -- |
 -- The closed set of operator alias types.
 --
-data OpNameType = ValueOpName | TypeOpName
+data OpNameType = ValueOpName | TypeOpName | AnyOpName
+
+eraseOpName :: OpName a -> OpName 'AnyOpName
+eraseOpName = OpName . runOpName
 
 -- |
 -- Proper names, i.e. capitalized names for e.g. module names, type//data constructors.
@@ -163,11 +177,15 @@ moduleNameFromString = ModuleName . splitProperNames
     s' -> ProperName w : splitProperNames s''
       where (w, s'') = T.break (== '.') s'
 
+isBuiltinModuleName :: ModuleName -> Bool
+isBuiltinModuleName (ModuleName (ProperName "Prim" : _)) = True
+isBuiltinModuleName _ = False
+
 -- |
 -- A qualified name, i.e. a name with an optional module name
 --
 data Qualified a = Qualified (Maybe ModuleName) a
-  deriving (Show, Eq, Ord, Functor, Generic)
+  deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 instance NFData a => NFData (Qualified a)
 

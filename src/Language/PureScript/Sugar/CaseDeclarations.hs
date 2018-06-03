@@ -64,14 +64,14 @@ desugarGuardedExprs ss (Case scrut alternatives)
     -- We bind the scrutinee to Vars here to mitigate this case.
     (scrut', scrut_decls) <- unzip <$> forM scrut (\e -> do
       scrut_id <- freshIdent'
-      pure ( Var (Qualified Nothing scrut_id)
-           , ValueDeclaration (ss, []) scrut_id Private [] [MkUnguarded e]
+      pure ( Var ss (Qualified Nothing scrut_id)
+           , ValueDecl (ss, []) scrut_id Private [] [MkUnguarded e]
            )
       )
-    Let scrut_decls <$> desugarGuardedExprs ss (Case scrut' alternatives)
+    Let FromLet scrut_decls <$> desugarGuardedExprs ss (Case scrut' alternatives)
   where
-    isTrivialExpr (Var _) = True
-    isTrivialExpr (Literal _) = True
+    isTrivialExpr (Var _ _) = True
+    isTrivialExpr (Literal _ _) = True
     isTrivialExpr (Accessor _ e) = isTrivialExpr e
     isTrivialExpr (Parens e) = isTrivialExpr e
     isTrivialExpr (PositionedValue _ _ e) = isTrivialExpr e
@@ -196,7 +196,7 @@ desugarGuardedExprs ss (Case scrut alternatives) =
       | isTrueExpr c = desugarGuard gs e match_failed
       | otherwise =
         Case [c]
-          (CaseAlternative [LiteralBinder (BooleanLiteral True)]
+          (CaseAlternative [LiteralBinder ss (BooleanLiteral True)]
             [MkUnguarded (desugarGuard gs e match_failed)] : match_failed)
 
     desugarGuard (PatternGuard vb g : gs) e match_failed =
@@ -226,13 +226,13 @@ desugarGuardedExprs ss (Case scrut alternatives) =
 
         let
           goto_rem_case :: Expr
-          goto_rem_case = Var (Qualified Nothing rem_case_id)
-            `App` Literal (BooleanLiteral True)
+          goto_rem_case = Var ss (Qualified Nothing rem_case_id)
+            `App` Literal ss (BooleanLiteral True)
           alt_fail = [CaseAlternative [NullBinder] [MkUnguarded goto_rem_case]]
 
-        pure $ Let [
-          ValueDeclaration (ss, []) rem_case_id Private []
-            [MkUnguarded (Abs (VarBinder unused_binder) desugared)]
+        pure $ Let FromLet [
+          ValueDecl (ss, []) rem_case_id Private []
+            [MkUnguarded (Abs (VarBinder ss unused_binder) desugared)]
           ] (mk_body alt_fail)
 
       | otherwise
@@ -308,11 +308,11 @@ desugarAbs = flip parU f
   (f, _, _) = everywhereOnValuesM return replace return
 
   replace :: Expr -> m Expr
-  replace (Abs (stripPositioned -> (VarBinder i)) val) =
-    pure (Abs (VarBinder i) val)
+  replace (Abs (stripPositioned -> (VarBinder ss i)) val) =
+    pure (Abs (VarBinder ss i) val)
   replace (Abs binder val) = do
     ident <- freshIdent'
-    return $ Abs (VarBinder ident) $ Case [Var (Qualified Nothing ident)] [CaseAlternative [binder] [MkUnguarded val]]
+    return $ Abs (VarBinder nullSourceSpan ident) $ Case [Var nullSourceSpan (Qualified Nothing ident)] [CaseAlternative [binder] [MkUnguarded val]]
   replace other = return other
 
 stripPositioned :: Binder -> Binder
@@ -326,36 +326,36 @@ desugarCases :: forall m. (MonadSupply m, MonadError MultipleErrors m) => [Decla
 desugarCases = desugarRest <=< fmap join . flip parU toDecls . groupBy inSameGroup
   where
     desugarRest :: [Declaration] -> m [Declaration]
-    desugarRest (TypeInstanceDeclaration sa name constraints className tys ds : rest) =
-      (:) <$> (TypeInstanceDeclaration sa name constraints className tys <$> traverseTypeInstanceBody desugarCases ds) <*> desugarRest rest
-    desugarRest (ValueDeclaration sa name nameKind bs result : rest) =
+    desugarRest (TypeInstanceDeclaration sa cd idx name constraints className tys ds : rest) =
+      (:) <$> (TypeInstanceDeclaration sa cd idx name constraints className tys <$> traverseTypeInstanceBody desugarCases ds) <*> desugarRest rest
+    desugarRest (ValueDecl sa name nameKind bs result : rest) =
       let (_, f, _) = everywhereOnValuesTopDownM return go return
           f' = mapM (\(GuardedExpr gs e) -> GuardedExpr gs <$> f e)
-      in (:) <$> (ValueDeclaration sa name nameKind bs <$> f' result) <*> desugarRest rest
+      in (:) <$> (ValueDecl sa name nameKind bs <$> f' result) <*> desugarRest rest
       where
-      go (Let ds val') = Let <$> desugarCases ds <*> pure val'
+      go (Let w ds val') = Let w <$> desugarCases ds <*> pure val'
       go other = return other
     desugarRest (d : ds) = (:) d <$> desugarRest ds
     desugarRest [] = pure []
 
 inSameGroup :: Declaration -> Declaration -> Bool
-inSameGroup (ValueDeclaration _ ident1 _ _ _) (ValueDeclaration _ ident2 _ _ _) = ident1 == ident2
+inSameGroup (ValueDeclaration vd1) (ValueDeclaration vd2) = valdeclIdent vd1 == valdeclIdent vd2
 inSameGroup _ _ = False
 
 toDecls :: forall m. (MonadSupply m, MonadError MultipleErrors m) => [Declaration] -> m [Declaration]
-toDecls [ValueDeclaration sa@(ss, _) ident nameKind bs [MkUnguarded val]] | all isIrrefutable bs = do
+toDecls [ValueDecl sa@(ss, _) ident nameKind bs [MkUnguarded val]] | all isIrrefutable bs = do
   args <- mapM fromVarBinder bs
-  let body = foldr (Abs . VarBinder) val args
+  let body = foldr (Abs . VarBinder ss) val args
   guardWith (errorMessage' ss (OverlappingArgNames (Just ident))) $ length (ordNub args) == length args
-  return [ValueDeclaration sa ident nameKind [] [MkUnguarded body]]
+  return [ValueDecl sa ident nameKind [] [MkUnguarded body]]
   where
   fromVarBinder :: Binder -> m Ident
   fromVarBinder NullBinder = freshIdent'
-  fromVarBinder (VarBinder name) = return name
+  fromVarBinder (VarBinder _ name) = return name
   fromVarBinder (PositionedBinder _ _ b) = fromVarBinder b
   fromVarBinder (TypedBinder _ b) = fromVarBinder b
   fromVarBinder _ = internalError "fromVarBinder: Invalid argument"
-toDecls ds@(ValueDeclaration (ss, _) ident _ bs (result : _) : _) = do
+toDecls ds@(ValueDecl (ss, _) ident _ bs (result : _) : _) = do
   let tuples = map toTuple ds
 
       isGuarded (MkUnguarded _) = False
@@ -370,7 +370,7 @@ toDecls ds@(ValueDeclaration (ss, _) ident _ bs (result : _) : _) = do
 toDecls ds = return ds
 
 toTuple :: Declaration -> ([Binder], [GuardedExpr])
-toTuple (ValueDeclaration _ _ _ bs result) = (bs, result)
+toTuple (ValueDecl _ _ _ bs result) = (bs, result)
 toTuple _ = internalError "Not a value declaration"
 
 makeCaseDeclaration :: forall m. (MonadSupply m) => SourceSpan -> Ident -> [([Binder], [GuardedExpr])] -> m Declaration
@@ -380,18 +380,18 @@ makeCaseDeclaration ss ident alternatives = do
   args <- if allUnique (catMaybes argNames)
             then mapM argName argNames
             else replicateM (length argNames) freshIdent'
-  let vars = map (Var . Qualified Nothing) args
+  let vars = map (Var ss . Qualified Nothing) args
       binders = [ CaseAlternative bs result | (bs, result) <- alternatives ]
-  let value = foldr (Abs . VarBinder) (Case vars binders) args
+  let value = foldr (Abs . VarBinder ss) (Case vars binders) args
 
-  return $ ValueDeclaration (ss, []) ident Public [] [MkUnguarded value]
+  return $ ValueDecl (ss, []) ident Public [] [MkUnguarded value]
   where
   -- We will construct a table of potential names.
   -- VarBinders will become Just _ which is a potential name.
   -- Everything else becomes Nothing, which indicates that we
   -- have to generate a name.
   findName :: Binder -> Maybe Ident
-  findName (VarBinder name) = Just name
+  findName (VarBinder _ name) = Just name
   findName (PositionedBinder _ _ binder) = findName binder
   findName _ = Nothing
 

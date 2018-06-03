@@ -115,23 +115,23 @@ genericMerge f bsl@((s, b):bs) bsr@((s', b'):bs')
 --
 missingCasesSingle :: Environment -> ModuleName -> Binder -> Binder -> ([Binder], Either RedundancyError Bool)
 missingCasesSingle _ _ _ NullBinder = ([], return True)
-missingCasesSingle _ _ _ (VarBinder _) = ([], return True)
-missingCasesSingle env mn (VarBinder _) b = missingCasesSingle env mn NullBinder b
-missingCasesSingle env mn br (NamedBinder _ bl) = missingCasesSingle env mn br bl
-missingCasesSingle env mn NullBinder cb@(ConstructorBinder con _) =
+missingCasesSingle _ _ _ (VarBinder _ _) = ([], return True)
+missingCasesSingle env mn (VarBinder _ _) b = missingCasesSingle env mn NullBinder b
+missingCasesSingle env mn br (NamedBinder _ _ bl) = missingCasesSingle env mn br bl
+missingCasesSingle env mn NullBinder cb@(ConstructorBinder ss con _) =
   (concatMap (\cp -> fst $ missingCasesSingle env mn cp cb) allPatterns, return True)
   where
-  allPatterns = map (\(p, t) -> ConstructorBinder (qualifyName p mn con) (initialize $ length t))
+  allPatterns = map (\(p, t) -> ConstructorBinder ss (qualifyName p mn con) (initialize $ length t))
                   $ getConstructors env mn con
-missingCasesSingle env mn cb@(ConstructorBinder con bs) (ConstructorBinder con' bs')
-  | con == con' = let (bs'', pr) = missingCasesMultiple env mn bs bs' in (map (ConstructorBinder con) bs'', pr)
+missingCasesSingle env mn cb@(ConstructorBinder ss con bs) (ConstructorBinder _ con' bs')
+  | con == con' = let (bs'', pr) = missingCasesMultiple env mn bs bs' in (map (ConstructorBinder ss con) bs'', pr)
   | otherwise = ([cb], return False)
-missingCasesSingle env mn NullBinder (LiteralBinder (ObjectLiteral bs)) =
-  (map (LiteralBinder . ObjectLiteral . zip (map fst bs)) allMisses, pr)
+missingCasesSingle env mn NullBinder (LiteralBinder ss (ObjectLiteral bs)) =
+  (map (LiteralBinder ss . ObjectLiteral . zip (map fst bs)) allMisses, pr)
   where
   (allMisses, pr) = missingCasesMultiple env mn (initialize $ length bs) (map snd bs)
-missingCasesSingle env mn (LiteralBinder (ObjectLiteral bs)) (LiteralBinder (ObjectLiteral bs')) =
-  (map (LiteralBinder . ObjectLiteral . zip sortedNames) allMisses, pr)
+missingCasesSingle env mn (LiteralBinder _ (ObjectLiteral bs)) (LiteralBinder ss (ObjectLiteral bs')) =
+  (map (LiteralBinder ss . ObjectLiteral . zip sortedNames) allMisses, pr)
   where
   (allMisses, pr) = uncurry (missingCasesMultiple env mn) (unzip binders)
 
@@ -148,10 +148,10 @@ missingCasesSingle env mn (LiteralBinder (ObjectLiteral bs)) (LiteralBinder (Obj
   compBS e s b b' = (s, compB e b b')
 
   (sortedNames, binders) = unzip $ genericMerge (compBS NullBinder) sbs sbs'
-missingCasesSingle _ _ NullBinder (LiteralBinder (BooleanLiteral b)) = ([LiteralBinder . BooleanLiteral $ not b], return True)
-missingCasesSingle _ _ (LiteralBinder (BooleanLiteral bl)) (LiteralBinder (BooleanLiteral br))
+missingCasesSingle _ _ NullBinder (LiteralBinder ss (BooleanLiteral b)) = ([LiteralBinder ss . BooleanLiteral $ not b], return True)
+missingCasesSingle _ _ (LiteralBinder ss (BooleanLiteral bl)) (LiteralBinder _ (BooleanLiteral br))
   | bl == br = ([], return True)
-  | otherwise = ([LiteralBinder $ BooleanLiteral bl], return False)
+  | otherwise = ([LiteralBinder ss $ BooleanLiteral bl], return False)
 missingCasesSingle env mn b (PositionedBinder _ _ cb) = missingCasesSingle env mn b cb
 missingCasesSingle env mn b (TypedBinder _ cb) = missingCasesSingle env mn b cb
 missingCasesSingle _ _ b _ = ([b], Left Unknown)
@@ -290,16 +290,17 @@ checkExhaustive ss env mn numArgs cas expr = makeResult . first ordNub $ foldl' 
     var <- freshName
     return $
       Let
+        FromLet
         [ partial var tyVar ]
-        $ App (Var (Qualified Nothing (Ident C.__unused))) e
+        $ App (Var ss (Qualified Nothing UnusedIdent)) e
     where
       partial :: Text -> Text -> Declaration
       partial var tyVar =
-        ValueDeclaration (ss, []) (Ident C.__unused) Private [] $
+        ValueDecl (ss, []) UnusedIdent Private [] $
         [MkUnguarded
           (TypedValue
            True
-           (Abs (VarBinder (Ident var)) (Var (Qualified Nothing (Ident var))))
+           (Abs (VarBinder ss (Ident var)) (Var ss (Qualified Nothing (Ident var))))
            (ty tyVar))
         ]
 
@@ -331,13 +332,14 @@ checkExhaustiveExpr initSS env mn = onExpr initSS
   where
   onDecl :: Declaration -> m Declaration
   onDecl (BindingGroupDeclaration bs) = BindingGroupDeclaration <$> mapM (\(sai@((ss, _), _), nk, expr) -> (sai, nk,) <$> onExpr ss expr) bs
-  onDecl (ValueDeclaration sa@(ss, _) name x y [MkUnguarded e]) = ValueDeclaration sa name x y . mkUnguardedExpr <$> censor (addHint (ErrorInValueDeclaration name)) (onExpr ss e)
+  onDecl (ValueDecl sa@(ss, _) name x y [MkUnguarded e]) =
+     ValueDecl sa name x y . mkUnguardedExpr <$> censor (addHint (ErrorInValueDeclaration name)) (onExpr ss e)
   onDecl decl = return decl
 
   onExpr :: SourceSpan -> Expr -> m Expr
-  onExpr ss (UnaryMinus e) = UnaryMinus <$> onExpr ss e
-  onExpr ss (Literal (ArrayLiteral es)) = Literal . ArrayLiteral <$> mapM (onExpr ss) es
-  onExpr ss (Literal (ObjectLiteral es)) = Literal . ObjectLiteral <$> mapM (sndM (onExpr ss)) es
+  onExpr _ (UnaryMinus ss e) = UnaryMinus ss <$> onExpr ss e
+  onExpr _ (Literal ss (ArrayLiteral es)) = Literal ss . ArrayLiteral <$> mapM (onExpr ss) es
+  onExpr _ (Literal ss (ObjectLiteral es)) = Literal ss . ObjectLiteral <$> mapM (sndM (onExpr ss)) es
   onExpr ss (TypeClassDictionaryConstructorApp x e) = TypeClassDictionaryConstructorApp x <$> onExpr ss e
   onExpr ss (Accessor x e) = Accessor x <$> onExpr ss e
   onExpr ss (ObjectUpdate o es) = ObjectUpdate <$> onExpr ss o <*> mapM (sndM (onExpr ss)) es
@@ -348,7 +350,7 @@ checkExhaustiveExpr initSS env mn = onExpr initSS
     case' <- Case <$> mapM (onExpr ss) es <*> mapM (onCaseAlternative ss) cas
     checkExhaustive ss env mn (length es) cas case'
   onExpr ss (TypedValue x e y) = TypedValue x <$> onExpr ss e <*> pure y
-  onExpr ss (Let ds e) = Let <$> mapM onDecl ds <*> onExpr ss e
+  onExpr ss (Let w ds e) = Let w <$> mapM onDecl ds <*> onExpr ss e
   onExpr _ (PositionedValue ss x e) = PositionedValue ss x <$> onExpr ss e
   onExpr _ expr = return expr
 
