@@ -7,21 +7,24 @@ import qualified Data.Text as T
 import qualified Text.Parsec as P
 import Text.Parsec ( (<|>) )
 import qualified Text.Parsec.Char as PC
+import Control.Monad (void)
 
 parseFile :: P.SourceName -> Text -> Either P.ParseError [(Text, Int)]
 parseFile = P.parse parseLines
 
 parseLines :: P.Parsec Text u [(Text, Int)]
 parseLines = do
-  lns <- P.many parseLine
+  l <- parseLine
+  lns <- P.many $ do
+    _ <- P.endOfLine
+    parseLine
   P.eof
-  pure (concat lns)
+  pure (concat $ l : lns)
 
 parseLine :: P.Parsec Text u [(Text, Int)]
 parseLine = P.try parseAttribute <|>
   do
     P.skipMany (PC.noneOf ['\n', '\r'])
-    _ <- P.endOfLine
     pure []
 
 parseAttribute :: P.Parsec Text u [(Text, Int)]
@@ -39,7 +42,6 @@ attributeParser name valueParser =
     _ <- PC.string name
     res <- P.between (PC.char '(') (PC.char ')') valueParser
     _ <- PC.char '.'
-    _ <- PC.endOfLine
     pure res
 
 atomArityParser :: P.Parsec Text u (Text, Int)
