@@ -69,13 +69,14 @@ moduleToErl :: forall m .
   => E.Environment
   -> Module Ann
   -> [(T.Text, Int)]
+  -> [(Ident, Type)]
   -> m ([T.Text], [Erl])
-moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports =
+moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports foreignTypes =
   rethrow (addHint (ErrorInModule mn)) $ do
     res <- traverse topBindToErl decls
     let (exports, erlDecls) = biconcat $ res <> map reExportForeign foreigns
     optimized <- traverse optimize erlDecls
-    traverse_ checkExport foreigns
+    traverse_ checkExport foreignTypes
 
     let attributes = findAttributes decls
 
@@ -120,12 +121,12 @@ moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports =
   exportArity :: Ident -> Int
   exportArity ident = fromMaybe 0 $ findExport $ runIdent ident
 
-  checkExport :: Ident -> m ()
-  checkExport ident =
-    case findExport (runIdent ident) of -- TODO (, tyArity ty)
-      -- (Just m, n) | m > n ->
-      --   throwError . errorMessage $ InvalidFFIArity mn (runIdent ident) m n
-      Nothing ->
+  checkExport :: (Ident, Type) -> m ()
+  checkExport (ident, ty) =
+    case (findExport (runIdent ident), tyArity ty) of
+      (Just m, n) | m > n ->
+        throwError . errorMessage $ InvalidFFIArity mn (runIdent ident) m n
+      (Nothing, _) ->
         throwError . errorMessage $ MissingFFIImplementations mn [ident]
       _ -> pure ()
 

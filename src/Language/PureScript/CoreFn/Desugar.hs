@@ -30,7 +30,7 @@ import Language.PureScript.PSString (mkString)
 import qualified Language.PureScript.AST as A
 
 -- | Desugars a module from AST to CoreFn representation.
-moduleToCoreFn :: Environment -> A.Module -> Module Ann
+moduleToCoreFn :: Environment -> A.Module -> (Module Ann, [(Ident, Type)])
 moduleToCoreFn _ (A.Module _ _ _ _ Nothing) =
   internalError "Module exports were not elaborated before moduleToCoreFn"
 moduleToCoreFn env (A.Module modSS coms mn decls (Just exps)) =
@@ -39,7 +39,7 @@ moduleToCoreFn env (A.Module modSS coms mn decls (Just exps)) =
       exps' = ordNub $ concatMap exportToCoreFn exps
       externs = ordNub $ mapMaybe externToCoreFn decls
       decls' = concatMap declToCoreFn decls
-  in Module modSS coms mn (spanName modSS) imports' exps' externs decls'
+  in (Module modSS coms mn (spanName modSS) imports' exps' (map fst externs) decls', externs)
 
   where
 
@@ -224,8 +224,8 @@ importToCoreFn (A.ImportDeclaration (ss, com) name _ _) = Just ((ss, com, Nothin
 importToCoreFn _ = Nothing
 
 -- | Desugars foreign declarations from AST to CoreFn representation.
-externToCoreFn :: A.Declaration -> Maybe Ident
-externToCoreFn (A.ExternDeclaration _ name _) = Just name
+externToCoreFn :: A.Declaration -> Maybe (Ident, Type)
+externToCoreFn (A.ExternDeclaration _ name ty) = Just (name, ty)
 externToCoreFn _ = Nothing
 
 -- | Desugars export declarations references from AST to CoreFn representation.
