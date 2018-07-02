@@ -9,7 +9,6 @@ module Language.PureScript.CodeGen.Erl.Optimizer (optimize) where
 
 import Prelude.Compat
 
-import Control.Monad.Reader (MonadReader, ask, asks)
 import Control.Monad.Supply.Class (MonadSupply)
 
 import Language.PureScript.CodeGen.Erl.AST
@@ -32,7 +31,8 @@ optimize erl = do
     ]) erl
   untilFixedPoint (pure . tidyUp)
     =<< untilFixedPoint (return . magicDo')
-    =<< untilFixedPoint (return . magicDo) erl'
+    -- =<< untilFixedPoint (return . magicDo) 
+    erl'
 
   where
   tidyUp :: Erl -> Erl

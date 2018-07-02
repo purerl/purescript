@@ -2,32 +2,24 @@
 -- This module provides basic inlining capabilities
 --
 module Language.PureScript.CodeGen.Erl.Optimizer.Inliner
---   ( inlineVariables
   ( inlineCommonValues
   , inlineCommonOperators
   , evaluateIifes
   )
   where
---   , inlineCommonOperators
---   , inlineFnComposition
---   , etaConvert
---   , unThunk
---   ) where
---
+
 import Prelude.Compat
 
 import Data.Text (Text)
+import Data.String (IsString)
+import Language.PureScript.PSString (PSString)
 
--- import Control.Monad.Supply.Class (MonadSupply, freshName)
---
--- import Data.Maybe (fromMaybe)
---
 import Language.PureScript.CodeGen.Erl.AST
 import Language.PureScript.CodeGen.Erl.Optimizer.Common
 import qualified Language.PureScript.Constants as C
 import qualified Language.PureScript.CodeGen.Erl.Constants as EC
 
---
+
 -- -- TODO: Potential bug:
 -- -- Shouldn't just inline this case: { var x = 0; x.toFixed(10); }
 -- -- Needs to be: { 0..toFixed(10); }
@@ -178,33 +170,21 @@ inlineCommonOperators = applyAll
 --   ] ++
 --   [ fn | i <- [0..10], fn <- [ mkFn i, runFn i ] ]
   where
-  binary :: (Text, Text) -> (Text, Text) -> BinaryOperator -> Erl -> Erl
+  binary ::  (Text, PSString) -> (Text, PSString) -> BinaryOperator -> Erl -> Erl
   binary dict fns op = everywhereOnErl convert
     where
     convert :: Erl -> Erl
-    -- TODO compiling
-    -- convert (EApp (EApp (EApp fn [dict']) [x]) [y]) | isDict dict dict' && isFn fns fn = EBinary op x y
+    convert (EApp fn [dict', x, y]) | isDict dict dict' && isUncurriedFn fns fn = EBinary op x y
     convert other = other
---   binary' :: Text -> Text -> BinaryOperator -> JS -> JS
---   binary' moduleName opText op = everywhereOnJS convert
---     where
---     convert :: JS -> JS
---     convert (JSApp ss (JSApp _ fn [x]) [y]) | isFn (moduleName, opText) fn = JSBinary ss op x y
---     convert other = other
-  unary :: (Text, Text) -> (Text, Text) -> UnaryOperator -> Erl -> Erl
+
+  unary ::  (Text, PSString) -> (Text, PSString) -> UnaryOperator -> Erl -> Erl
   unary dicts fns op = everywhereOnErl convert
     where
     convert :: Erl -> Erl
-    -- TODO compiling
-    -- convert (EApp (EApp fn [dict']) [x]) | isDict dicts dict' && isFn fns fn = EUnary op x
+    convert (EApp (EApp fn [dict']) [x]) | isDict dicts dict' && isDict fns fn = EUnary op x
     convert other = other
---   unary' :: Text -> Text -> UnaryOperator -> JS -> JS
---   unary' moduleName fnName op = everywhereOnJS convert
---     where
---     convert :: JS -> JS
---     convert (JSApp ss fn [x]) | isFn (moduleName, fnName) fn = JSUnary ss op x
---     convert other = other
---   mkFn :: Int -> JS -> JS
+
+    --   mkFn :: Int -> JS -> JS
 --   mkFn 0 = everywhereOnJS convert
 --     where
 --     convert :: JS -> JS
@@ -280,110 +260,105 @@ inlineCommonOperators = applyAll
 --   fnComposeFlipped :: (Text, Text)
 --   fnComposeFlipped = (C.controlSemigroupoid, C.composeFlipped)
 --
-semiringNumber :: (Text, Text)
+
+semiringNumber :: forall a b. (IsString a, IsString b) => (a, b)
 semiringNumber = (EC.dataSemiring, C.semiringNumber)
 
-semiringInt :: (Text, Text)
+semiringInt :: forall a b. (IsString a, IsString b) => (a, b)
 semiringInt = (EC.dataSemiring, C.semiringInt)
 
-ringNumber :: (Text, Text)
+ringNumber :: forall a b. (IsString a, IsString b) => (a, b)
 ringNumber = (EC.dataRing, C.ringNumber)
 
-ringInt :: (Text, Text)
+ringInt :: forall a b. (IsString a, IsString b) => (a, b)
 ringInt = (EC.dataRing, C.ringInt)
 
-euclideanRingNumber :: (Text, Text)
+euclideanRingNumber :: forall a b. (IsString a, IsString b) => (a, b)
 euclideanRingNumber = (EC.dataEuclideanRing, C.euclideanRingNumber)
 
-euclideanRingInt :: (Text, Text)
-euclideanRingInt = (EC.dataEuclideanRing, C.euclideanRingInt)
-
-eqNumber :: (Text, Text)
+eqNumber :: forall a b. (IsString a, IsString b) => (a, b)
 eqNumber = (EC.dataEq, C.eqNumber)
 
-eqInt :: (Text, Text)
+eqInt :: forall a b. (IsString a, IsString b) => (a, b)
 eqInt = (EC.dataEq, C.eqInt)
 
-eqString :: (Text, Text)
+eqString :: forall a b. (IsString a, IsString b) => (a, b)
 eqString = (EC.dataEq, C.eqString)
 
-eqChar :: (Text, Text)
+eqChar :: forall a b. (IsString a, IsString b) => (a, b)
 eqChar = (EC.dataEq, C.eqChar)
 
-eqBoolean :: (Text, Text)
+eqBoolean :: forall a b. (IsString a, IsString b) => (a, b)
 eqBoolean = (EC.dataEq, C.eqBoolean)
 
-ordBoolean :: (Text, Text)
+ordBoolean :: forall a b. (IsString a, IsString b) => (a, b)
 ordBoolean = (EC.dataOrd, C.ordBoolean)
 
-ordNumber :: (Text, Text)
-ordNumber = (EC.dataOrd, C.ordNumber)
+ordNumber :: forall a b. (IsString a, IsString b) => (a, b)
+ordNumber = (C.dataOrd, C.ordNumber)
 
-ordInt :: (Text, Text)
+ordInt :: forall a b. (IsString a, IsString b) => (a, b)
 ordInt = (EC.dataOrd, C.ordInt)
 
-ordString :: (Text, Text)
+ordString :: forall a b. (IsString a, IsString b) => (a, b)
 ordString = (EC.dataOrd, C.ordString)
 
-ordChar :: (Text, Text)
+ordChar :: forall a b. (IsString a, IsString b) => (a, b)
 ordChar = (EC.dataOrd, C.ordChar)
 
-semigroupString :: (Text, Text)
+semigroupString :: forall a b. (IsString a, IsString b) => (a, b)
 semigroupString = (EC.dataSemigroup, C.semigroupString)
 
-boundedBoolean :: (Text, Text)
+boundedBoolean :: forall a b. (IsString a, IsString b) => (a, b)
 boundedBoolean = (EC.dataBounded, C.boundedBoolean)
 
-heytingAlgebraBoolean :: (Text, Text)
+heytingAlgebraBoolean :: forall a b. (IsString a, IsString b) => (a, b)
 heytingAlgebraBoolean = (EC.dataHeytingAlgebra, C.heytingAlgebraBoolean)
 
-semigroupoidFn :: (Text, Text)
+semigroupoidFn :: forall a b. (IsString a, IsString b) => (a, b)
 semigroupoidFn = (EC.controlSemigroupoid, C.semigroupoidFn)
 
-opAdd :: (Text, Text)
+opAdd :: forall a b. (IsString a, IsString b) => (a, b)
 opAdd = (EC.dataSemiring, C.add)
 
-opMul :: (Text, Text)
+opMul :: forall a b. (IsString a, IsString b) => (a, b)
 opMul = (EC.dataSemiring, C.mul)
 
-opEq :: (Text, Text)
+opEq :: forall a b. (IsString a, IsString b) => (a, b)
 opEq = (EC.dataEq, C.eq)
 
-opNotEq :: (Text, Text)
+opNotEq :: forall a b. (IsString a, IsString b) => (a, b)
 opNotEq = (EC.dataEq, C.notEq)
 
-opLessThan :: (Text, Text)
+opLessThan :: forall a b. (IsString a, IsString b) => (a, b)
 opLessThan = (EC.dataOrd, C.lessThan)
 
-opLessThanOrEq :: (Text, Text)
+opLessThanOrEq :: forall a b. (IsString a, IsString b) => (a, b)
 opLessThanOrEq = (EC.dataOrd, C.lessThanOrEq)
 
-opGreaterThan :: (Text, Text)
+opGreaterThan :: forall a b. (IsString a, IsString b) => (a, b)
 opGreaterThan = (EC.dataOrd, C.greaterThan)
 
-opGreaterThanOrEq :: (Text, Text)
+opGreaterThanOrEq :: forall a b. (IsString a, IsString b) => (a, b)
 opGreaterThanOrEq = (EC.dataOrd, C.greaterThanOrEq)
 
-opAppend :: (Text, Text)
+opAppend :: forall a b. (IsString a, IsString b) => (a, b)
 opAppend = (EC.dataSemigroup, C.append)
 
-opSub :: (Text, Text)
+opSub :: forall a b. (IsString a, IsString b) => (a, b)
 opSub = (EC.dataRing, C.sub)
 
-opNegate :: (Text, Text)
+opNegate :: forall a b. (IsString a, IsString b) => (a, b)
 opNegate = (EC.dataRing, C.negate)
 
-opDiv :: (Text, Text)
+opDiv :: forall a b. (IsString a, IsString b) => (a, b)
 opDiv = (EC.dataEuclideanRing, C.div)
 
-opMod :: (Text, Text)
-opMod = (EC.dataEuclideanRing, C.mod)
-
-opConj :: (Text, Text)
+opConj :: forall a b. (IsString a, IsString b) => (a, b)
 opConj = (EC.dataHeytingAlgebra, C.conj)
 
-opDisj :: (Text, Text)
+opDisj :: forall a b. (IsString a, IsString b) => (a, b)
 opDisj = (EC.dataHeytingAlgebra, C.disj)
 
-opNot :: (Text, Text)
+opNot :: forall a b. (IsString a, IsString b) => (a, b)
 opNot = (EC.dataHeytingAlgebra, C.not)

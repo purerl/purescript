@@ -37,8 +37,6 @@ import Language.PureScript.Traversals (sndM)
 import Language.PureScript.CodeGen.Erl.Common
 import Language.PureScript.CodeGen.Erl.Optimizer
 
-import Debug.Trace
-
 freshNameErl :: (MonadSupply m) => m T.Text
 freshNameErl = fmap (("_@" <>) . T.pack . show) fresh
 

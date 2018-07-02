@@ -15,10 +15,10 @@ import qualified Language.PureScript.Constants as C
 import qualified Language.PureScript.CodeGen.Erl.Constants as EC
 
 magicDo :: Erl -> Erl
-magicDo = magicDo'' C.eff C.effDictionaries
+magicDo = magicDo'' EC.eff C.effDictionaries
 
 magicDo' :: Erl -> Erl
-magicDo' = magicDo'' C.effect C.effectDictionaries
+magicDo' = magicDo'' EC.effect C.effectDictionaries
 
 magicDo'' :: Text -> C.EffectDictionaries -> Erl -> Erl
 magicDo'' effectModule C.EffectDictionaries{..} = everywhereOnErl undo . everywhereOnErlTopDown convert
@@ -29,7 +29,7 @@ magicDo'' effectModule C.EffectDictionaries{..} = everywhereOnErl undo . everywh
 
   convert :: Erl -> Erl
   -- Desugar pure
-  convert (EApp (EApp pure' [val]) []) | isPure pure' = val
+  convert pure'@(EApp _ [_, val]) | isPure pure' = val
   -- Desugar >>
   convert (EApp (EApp bind [m]) [EFunFull Nothing [(EFunBinder [] Nothing, e)]]) | isBind bind =
     EFunFull (Just fnName) [(EFunBinder [] Nothing, EBlock (EApp m [] : [ EApp e [] ]))]
@@ -46,13 +46,21 @@ magicDo'' effectModule C.EffectDictionaries{..} = everywhereOnErl undo . everywh
   -- Check if an expression represents a monomorphic call to >>= for the Eff monad
   isBind (EApp fn [dict]) | isDict (effectModule, edBindDict) dict && isBindPoly fn = True
   isBind _ = False
+  -- Check if an expression represents a call to @discard@
+  isDiscard (EApp fn [dict1, dict2, _, _])
+    | isDict (EC.controlBind, C.discardUnitDictionary) dict1 && 
+      isDict (effectModule, edBindDict) dict2 &&
+      isDiscardPoly fn = True
+  isDiscard _ = False
   -- Check if an expression represents a monomorphic call to pure or return for the Eff applicative
-  isPure (EApp fn [dict]) | isDict (effectModule, edApplicativeDict) dict && isPurePoly fn = True
+  isPure (EApp fn [dict, _]) | isDict (effectModule, edApplicativeDict) dict && isPurePoly fn = True
   isPure _ = False
   -- Check if an expression represents the polymorphic >>= function
   isBindPoly = isFn (EC.controlBind, C.bind)
   -- Check if an expression represents the polymorphic pure or return function
-  isPurePoly = isFn (EC.controlApplicative, C.pure')
+  isPurePoly = isUncurriedFn (EC.controlApplicative, C.pure')
+  -- Check if an expression represents the polymorphic discard function
+  isDiscardPoly = isDict (EC.controlBind, C.discard)
 
   -- Remove __do function applications which remain after desugaring
   undo :: Erl -> Erl
