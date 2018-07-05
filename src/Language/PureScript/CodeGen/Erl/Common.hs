@@ -71,7 +71,7 @@ utf8Binary str = "\"" <> T.concat (convertChar <$> decodeStringEither str) <> "\
     convertChar (Right c) = replaceBasicEscape c
 
 encodeChar :: Word16 -> Text
--- encodeChar c | c > 0xFF = "\\x{" <> T.pack (showHex (fromEnum c) "") <> "}"
+encodeChar c | c > 0xFF = "\\x{" <> T.pack (showHex (fromEnum c) "") <> "}"
 encodeChar c | c > 0x7E || c < 0x20 =
   let hs = showHex (fromEnum c) ""
       x = T.pack (replicate (2 - length hs) '0' <> hs)
