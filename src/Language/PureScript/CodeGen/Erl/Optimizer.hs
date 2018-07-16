@@ -23,24 +23,23 @@ import Language.PureScript.CodeGen.Erl.Optimizer.Guards
 --
 
 optimize :: MonadSupply m => Erl -> m Erl
-optimize erl = pure erl
-  -- do
-  -- erl' <- untilFixedPoint (pure . tidyUp . applyAll
-  --   [ 
-  --   --   inlineCommonValues
-  --   -- , inlineCommonOperators
-  --   -- , evaluateIifes
-  --   ]) erl
-  -- -- untilFixedPoint (pure . tidyUp)
-  -- --   =<< untilFixedPoint (return . magicDo')
-  --   -- =<< untilFixedPoint (return . magicDo) 
-  -- pure erl'
+optimize erl = do
+    erl' <- untilFixedPoint (pure . tidyUp . applyAll
+      [ 
+        inlineCommonValues
+      , inlineCommonOperators
+      ]) erl
+    untilFixedPoint (pure . tidyUp)
+      =<< untilFixedPoint (return . magicDo')
+      =<< untilFixedPoint (return . magicDo) erl'
 
   where
   tidyUp :: Erl -> Erl
   tidyUp = applyAll
     [ collapseNestedBlocks
     , inlineSimpleGuards
+    , evaluateIifes
+    , etaConvert
     ]
 
 untilFixedPoint :: (Monad m, Eq a) => (a -> m a) -> a -> m a

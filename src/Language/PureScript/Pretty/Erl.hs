@@ -17,7 +17,6 @@ import Language.PureScript.PSString
 import Data.Monoid
 import Data.Text (Text)
 import Data.Word (Word16)
-import Numeric
 import qualified Data.Text as T
 import Data.Maybe (fromMaybe)
 

@@ -14,9 +14,9 @@ import Control.Arrow (second)
 
 import Language.PureScript.PSString (PSString)
 
--- -- |
--- -- Data type for simplified Javascript expressions
--- --
+-- |
+-- Data type for simplified Erlang expressions
+--
 data Erl
   -- |
   -- A numeric literal
@@ -42,45 +42,33 @@ data Erl
   -- A binary operator application
   --
   | EBinary BinaryOperator Erl Erl
-
-
   -- |
   -- Top-level function definition (over-simplified)
   --
   | EFunctionDef Atom [Text] Erl
-
   -- TODO not really a separate form. and misused
   | EVarBind Text Erl
-
   -- |
   -- A variable
   --
   | EVar Text
-
   -- |
   -- A function reference f/1
   --
   | EFunRef Atom Int
-
-
-
   -- |
   -- A fun definition
   --
   | EFun (Maybe Text) Text Erl
-
   | EFunFull (Maybe Text) [(EFunBinder, Erl)]
-
   -- |
   -- Function application
   --
   | EApp Erl [Erl]
-
   -- |
   -- Block
   --
   | EBlock [Erl]
-
   -- |
   -- Tuple literal {a, 1, "C"}
   --
@@ -97,7 +85,6 @@ data Erl
   | ECaseOf Erl [(EBinder, Erl)]
 
   | EArrayLiteral [Erl]
-
   -- |
   -- Attribute including raw text between the parens
   --
@@ -112,9 +99,7 @@ data EFunBinder
 
 data EBinder
   = EBinder Erl -- TODO split out literals?
-
   | EGuardedBinder Erl Guard
-  -- | EVarBinder String
 
   deriving (Show, Eq)
 
@@ -122,8 +107,8 @@ data Guard
   = Guard Erl
   deriving (Show, Eq)
 
--- \ Possibly qualified atom
--- | TODO : This is not really an atom, each part is an atom.
+-- | Possibly qualified atom
+-- TODO : This is not really an atom, each part is an atom.
 data Atom
   = Atom (Maybe Text) Text
   | AtomPS (Maybe Text) PSString
@@ -178,9 +163,6 @@ data BinaryOperator
   -- Remainder
   --
   | Remainder
-
-
-
   -- |
   -- Generic equality test
   --
