@@ -4,6 +4,7 @@
 module Language.PureScript.Docs.Convert
   ( convertModules
   , convertModulesWithEnv
+  , convertTaggedModulesInPackage
   , convertModulesInPackage
   , convertModulesInPackageWithEnv
   ) where
@@ -18,12 +19,38 @@ import Data.String (String)
 
 import Language.PureScript.Docs.Convert.ReExports (updateReExports)
 import Language.PureScript.Docs.Convert.Single (convertSingleModule)
+import Language.PureScript.Docs.Prim (primModules)
 import Language.PureScript.Docs.Types
 import qualified Language.PureScript as P
 
 import Web.Bower.PackageMeta (PackageName)
 
 import Text.Parsec (eof)
+
+-- |
+-- Like convertModuleInPackage, but with the modules tagged by their
+-- file paths.
+--
+convertTaggedModulesInPackage ::
+  (MonadError P.MultipleErrors m) =>
+  [(FilePath, P.Module)] ->
+  Map P.ModuleName PackageName ->
+  m [(FilePath, Module)]
+convertTaggedModulesInPackage taggedModules modulesDeps =
+  traverse pairDocModule =<< convertModulesInPackage modules modulesDeps
+  where
+  modules = map snd taggedModules
+
+  moduleNameToFileMap =
+    Map.fromList $ swap . fmap P.getModuleName <$> taggedModules
+
+  getModuleFile docModule =
+    case Map.lookup (modName docModule) moduleNameToFileMap of
+      Just filePath -> pure filePath
+      Nothing -> throwError . P.errorMessage $
+        P.ModuleNotFound $ modName docModule
+
+  pairDocModule docModule = (, docModule) <$> getModuleFile docModule
 
 -- |
 -- Like convertModules, except that it takes a list of modules, together with
@@ -48,7 +75,9 @@ convertModulesInPackageWithEnv modules modulesDeps =
   where
   go =
      convertModulesWithEnv withPackage
-     >>> fmap (first (filter (isLocal . modName)))
+     >>> fmap (first (filter (shouldKeep . modName)))
+
+  shouldKeep mn = isLocal mn && not (P.isBuiltinModuleName mn)
 
   withPackage :: P.ModuleName -> InPackage P.ModuleName
   withPackage mn =
@@ -102,10 +131,25 @@ convertSorted withPackage modules = do
   (env, convertedModules) <- second (map convertSingleModule) <$> partiallyDesugar modules
 
   modulesWithTypes <- typeCheckIfNecessary modules convertedModules
-  let moduleMap = Map.fromList (map (modName &&& identity) modulesWithTypes)
 
-  let traversalOrder = map P.getModuleName modules
-  pure (Map.elems (updateReExports env traversalOrder withPackage moduleMap), env)
+  -- We add the Prim docs modules here, so that docs generation is still
+  -- possible if the modules we are generating docs for re-export things from
+  -- Prim submodules. Note that the Prim modules do not exist as
+  -- @Language.PureScript.Module@ values because they do not contain anything
+  -- that exists at runtime. However, we have pre-constructed
+  -- @Language.PureScript.Docs.Types.Module@ values for them, which we use
+  -- here.
+  let moduleMap =
+        Map.fromList
+          (map (modName &&& identity)
+               (modulesWithTypes ++ primModules))
+
+  -- Set up the traversal order for re-export handling so that Prim modules
+  -- come first.
+  let primModuleNames = Map.keys P.primEnv
+  let traversalOrder = primModuleNames ++ map P.getModuleName modules
+  let withReExports = updateReExports env traversalOrder withPackage moduleMap
+  pure (Map.elems withReExports, env)
 
 -- |
 -- If any exported value declarations have either wildcard type signatures, or

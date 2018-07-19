@@ -32,3 +32,15 @@ commandTests = context "commandTests" $ do
     run ":reload"
     ms' <- psciImportedModules <$> get
     length ms' `equalsTo` 3
+
+  specPSCi ":complete" $ do
+    ":complete ma" `prints` []
+    ":complete Data.Functor.ma" `prints` []
+    run "import Data.Functor"
+    ":complete ma" `prints` unlines ["map", "mapFlipped"]
+    run "import Control.Monad as M"
+    ":complete M.a" `prints` unlines ["M.ap", "M.apply"]
+
+  specPSCi ":browse" $ do
+    ":browse Mirp" `printed` flip shouldContain "is not valid"
+    ":browse Prim" `printed` flip shouldContain "class Partial"

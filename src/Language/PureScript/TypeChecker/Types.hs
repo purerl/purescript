@@ -122,7 +122,7 @@ typesOf bindingGroupType moduleName vals = withFreshSubstitution $ do
 
       -- Check skolem variables did not escape their scope
       skolemEscapeCheck val'
-      return ((sai, (foldr (Abs . VarBinder . (\(x, _, _) -> x)) val' unsolved, generalized)), unsolved)
+      return ((sai, (foldr (Abs . VarBinder nullSourceSpan . (\(x, _, _) -> x)) val' unsolved, generalized)), unsolved)
 
     -- Show warnings here, since types in wildcards might have been solved during
     -- instance resolution (by functional dependencies).
@@ -305,20 +305,20 @@ infer'
    . (MonadSupply m, MonadState CheckState m, MonadError MultipleErrors m, MonadWriter MultipleErrors m)
   => Expr
   -> m Expr
-infer' v@(Literal (NumericLiteral (Left _))) = return $ TypedValue True v tyInt
-infer' v@(Literal (NumericLiteral (Right _))) = return $ TypedValue True v tyNumber
-infer' v@(Literal (StringLiteral _)) = return $ TypedValue True v tyString
-infer' v@(Literal (CharLiteral _)) = return $ TypedValue True v tyChar
-infer' v@(Literal (BooleanLiteral _)) = return $ TypedValue True v tyBoolean
-infer' (Literal (ArrayLiteral vals)) = do
+infer' v@(Literal _ (NumericLiteral (Left _))) = return $ TypedValue True v tyInt
+infer' v@(Literal _ (NumericLiteral (Right _))) = return $ TypedValue True v tyNumber
+infer' v@(Literal _ (StringLiteral _)) = return $ TypedValue True v tyString
+infer' v@(Literal _ (CharLiteral _)) = return $ TypedValue True v tyChar
+infer' v@(Literal _ (BooleanLiteral _)) = return $ TypedValue True v tyBoolean
+infer' (Literal ss (ArrayLiteral vals)) = do
   ts <- traverse infer vals
   els <- freshType
   ts' <- forM ts $ \(TypedValue ch val t) -> do
     (val', t') <- instantiatePolyTypeWithUnknowns val t
     unifyTypes els t'
     return (TypedValue ch val' t')
-  return $ TypedValue True (Literal (ArrayLiteral ts')) (TypeApp tyArray els)
-infer' (Literal (ObjectLiteral ps)) = do
+  return $ TypedValue True (Literal ss (ArrayLiteral ts')) (TypeApp tyArray els)
+infer' (Literal ss (ObjectLiteral ps)) = do
   ensureNoDuplicateProperties ps
   -- We make a special case for Vars in record labels, since these are the
   -- only types of expressions for which 'infer' can return a polymorphic type.
@@ -337,7 +337,7 @@ infer' (Literal (ObjectLiteral ps)) = do
         pure (name, valAndType)
   fields <- forM ps inferProperty
   let ty = TypeApp tyRecord $ rowFromList (map (Label *** snd) fields, REmpty)
-  return $ TypedValue True (Literal (ObjectLiteral (map (fmap (uncurry (TypedValue True))) fields))) ty
+  return $ TypedValue True (Literal ss (ObjectLiteral (map (fmap (uncurry (TypedValue True))) fields))) ty
 infer' (ObjectUpdate o ps) = do
   ensureNoDuplicateProperties ps
   row <- freshType
@@ -353,26 +353,27 @@ infer' (Accessor prop val) = withErrorMessageHint (ErrorCheckingAccessor val pro
   typed <- check val (TypeApp tyRecord (RCons (Label prop) field rest))
   return $ TypedValue True (Accessor prop typed) field
 infer' (Abs binder ret)
-  | VarBinder arg <- binder = do
+  | VarBinder ss arg <- binder = do
       ty <- freshType
       withBindingGroupVisible $ bindLocalVariables [(arg, ty, Defined)] $ do
         body@(TypedValue _ _ bodyTy) <- infer' ret
-        return $ TypedValue True (Abs (VarBinder arg) body) $ function ty bodyTy
+        (body', bodyTy') <- instantiatePolyTypeWithUnknowns body bodyTy
+        return $ TypedValue True (Abs (VarBinder ss arg) body') (function ty bodyTy')
   | otherwise = internalError "Binder was not desugared"
 infer' (App f arg) = do
   f'@(TypedValue _ _ ft) <- infer f
   (ret, app) <- checkFunctionApplication f' ft arg
   return $ TypedValue True app ret
-infer' (Var var) = do
+infer' (Var ss var) = do
   checkVisibility var
   ty <- introduceSkolemScope <=< replaceAllTypeSynonyms <=< replaceTypeWildcards <=< lookupVariable $ var
   case ty of
     ConstrainedType con ty' -> do
       dicts <- getTypeClassDictionaries
       hints <- getHints
-      return $ TypedValue True (App (Var var) (TypeClassDictionary con dicts hints)) ty'
-    _ -> return $ TypedValue True (Var var) ty
-infer' v@(Constructor c) = do
+      return $ TypedValue True (App (Var ss var) (TypeClassDictionary con dicts hints)) ty'
+    _ -> return $ TypedValue True (Var ss var) ty
+infer' v@(Constructor _ c) = do
   env <- getEnv
   case M.lookup c (dataConstructors env) of
     Nothing -> throwError . errorMessage . UnknownName . fmap DctorName $ c
@@ -391,9 +392,9 @@ infer' (IfThenElse cond th el) = do
   (el'', elTy') <- instantiatePolyTypeWithUnknowns el' elTy
   unifyTypes thTy' elTy'
   return $ TypedValue True (IfThenElse cond' th'' el'') thTy'
-infer' (Let ds val) = do
+infer' (Let w ds val) = do
   (ds', val'@(TypedValue _ _ valTy)) <- inferLetBinding [] ds val infer
-  return $ TypedValue True (Let ds' val') valTy
+  return $ TypedValue True (Let w ds' val') valTy
 infer' (DeferredDictionary className tys) = do
   dicts <- getTypeClassDictionaries
   hints <- getHints
@@ -426,7 +427,7 @@ inferLetBinding
   -> (Expr -> m Expr)
   -> m ([Declaration], Expr)
 inferLetBinding seen [] ret j = (,) seen <$> withBindingGroupVisible (j ret)
-inferLetBinding seen (ValueDeclaration sa@(ss, _) ident nameKind [] [MkUnguarded tv@(TypedValue checkType val ty)] : rest) ret j =
+inferLetBinding seen (ValueDecl sa@(ss, _) ident nameKind [] [MkUnguarded tv@(TypedValue checkType val ty)] : rest) ret j =
   warnAndRethrowWithPositionTC ss $ do
     Just moduleName <- checkCurrentModule <$> get
     (kind, args) <- kindOfWithScopedVars ty
@@ -434,14 +435,16 @@ inferLetBinding seen (ValueDeclaration sa@(ss, _) ident nameKind [] [MkUnguarded
     let dict = M.singleton (Qualified Nothing ident) (ty, nameKind, Undefined)
     ty' <- introduceSkolemScope <=< replaceAllTypeSynonyms <=< replaceTypeWildcards $ ty
     TypedValue _ val' ty'' <- if checkType then withScopedTypeVars moduleName args (bindNames dict (check val ty')) else return tv
-    bindNames (M.singleton (Qualified Nothing ident) (ty'', nameKind, Defined)) $ inferLetBinding (seen ++ [ValueDeclaration sa ident nameKind [] [MkUnguarded (TypedValue checkType val' ty'')]]) rest ret j
-inferLetBinding seen (ValueDeclaration sa@(ss, _) ident nameKind [] [MkUnguarded val] : rest) ret j =
+    bindNames (M.singleton (Qualified Nothing ident) (ty'', nameKind, Defined))
+      $ inferLetBinding (seen ++ [ValueDecl sa ident nameKind [] [MkUnguarded (TypedValue checkType val' ty'')]]) rest ret j
+inferLetBinding seen (ValueDecl sa@(ss, _) ident nameKind [] [MkUnguarded val] : rest) ret j =
   warnAndRethrowWithPositionTC ss $ do
     valTy <- freshType
     let dict = M.singleton (Qualified Nothing ident) (valTy, nameKind, Undefined)
     TypedValue _ val' valTy' <- bindNames dict $ infer val
     unifyTypes valTy valTy'
-    bindNames (M.singleton (Qualified Nothing ident) (valTy', nameKind, Defined)) $ inferLetBinding (seen ++ [ValueDeclaration sa ident nameKind [] [MkUnguarded val']]) rest ret j
+    bindNames (M.singleton (Qualified Nothing ident) (valTy', nameKind, Defined))
+      $ inferLetBinding (seen ++ [ValueDecl sa ident nameKind [] [MkUnguarded val']]) rest ret j
 inferLetBinding seen (BindingGroupDeclaration ds : rest) ret j = do
   Just moduleName <- checkCurrentModule <$> get
   SplitBindingGroup untyped typed dict <- typeDictionaryForBindingGroup Nothing . NEL.toList $ fmap (\(i, _, v) -> (i, v)) ds
@@ -461,30 +464,32 @@ inferBinder
   -> Binder
   -> m (M.Map Ident Type)
 inferBinder _ NullBinder = return M.empty
-inferBinder val (LiteralBinder (StringLiteral _)) = unifyTypes val tyString >> return M.empty
-inferBinder val (LiteralBinder (CharLiteral _)) = unifyTypes val tyChar >> return M.empty
-inferBinder val (LiteralBinder (NumericLiteral (Left _))) = unifyTypes val tyInt >> return M.empty
-inferBinder val (LiteralBinder (NumericLiteral (Right _))) = unifyTypes val tyNumber >> return M.empty
-inferBinder val (LiteralBinder (BooleanLiteral _)) = unifyTypes val tyBoolean >> return M.empty
-inferBinder val (VarBinder name) = return $ M.singleton name val
-inferBinder val (ConstructorBinder ctor binders) = do
+inferBinder val (LiteralBinder _ (StringLiteral _)) = unifyTypes val tyString >> return M.empty
+inferBinder val (LiteralBinder _ (CharLiteral _)) = unifyTypes val tyChar >> return M.empty
+inferBinder val (LiteralBinder _ (NumericLiteral (Left _))) = unifyTypes val tyInt >> return M.empty
+inferBinder val (LiteralBinder _ (NumericLiteral (Right _))) = unifyTypes val tyNumber >> return M.empty
+inferBinder val (LiteralBinder _ (BooleanLiteral _)) = unifyTypes val tyBoolean >> return M.empty
+inferBinder val (VarBinder _ name) = return $ M.singleton name val
+inferBinder val (ConstructorBinder ss ctor binders) = do
   env <- getEnv
   case M.lookup ctor (dataConstructors env) of
     Just (_, _, ty, _) -> do
       (_, fn) <- instantiatePolyTypeWithUnknowns (internalError "Data constructor types cannot contain constraints") ty
       fn' <- introduceSkolemScope <=< replaceAllTypeSynonyms $ fn
       let (args, ret) = peelArgs fn'
-      unless (length args == length binders) . throwError . errorMessage $ IncorrectConstructorArity ctor
+          expected = length args
+          actual = length binders
+      unless (expected == actual) . throwError . errorMessage' ss $ IncorrectConstructorArity ctor expected actual
       unifyTypes ret val
       M.unions <$> zipWithM inferBinder (reverse args) binders
-    _ -> throwError . errorMessage . UnknownName . fmap DctorName $ ctor
+    _ -> throwError . errorMessage' ss . UnknownName . fmap DctorName $ ctor
   where
   peelArgs :: Type -> ([Type], Type)
   peelArgs = go []
     where
     go args (TypeApp (TypeApp fn arg) ret) | fn == tyFunction = go (arg : args) ret
     go args ret = (args, ret)
-inferBinder val (LiteralBinder (ObjectLiteral props)) = do
+inferBinder val (LiteralBinder _ (ObjectLiteral props)) = do
   row <- freshType
   rest <- freshType
   m1 <- inferRowProperties row rest props
@@ -498,14 +503,15 @@ inferBinder val (LiteralBinder (ObjectLiteral props)) = do
     m1 <- inferBinder propTy binder
     m2 <- inferRowProperties nrow (RCons (Label name) propTy row) binders
     return $ m1 `M.union` m2
-inferBinder val (LiteralBinder (ArrayLiteral binders)) = do
+inferBinder val (LiteralBinder _ (ArrayLiteral binders)) = do
   el <- freshType
   m1 <- M.unions <$> traverse (inferBinder el) binders
   unifyTypes val (TypeApp tyArray el)
   return m1
-inferBinder val (NamedBinder name binder) = do
-  m <- inferBinder val binder
-  return $ M.insert name val m
+inferBinder val (NamedBinder ss name binder) =
+  warnAndRethrowWithPositionTC ss $ do
+    m <- inferBinder val binder
+    return $ M.insert name val m
 inferBinder val (PositionedBinder pos _ binder) =
   warnAndRethrowWithPositionTC pos $ inferBinder val binder
 inferBinder val (TypedBinder ty binder) = do
@@ -525,8 +531,8 @@ inferBinder _ ParensInBinder{} =
 -- | If this is the case, we need to instantiate any polymorphic types before checking binders.
 binderRequiresMonotype :: Binder -> Bool
 binderRequiresMonotype NullBinder = False
-binderRequiresMonotype (VarBinder _) = False
-binderRequiresMonotype (NamedBinder _ b) = binderRequiresMonotype b
+binderRequiresMonotype (VarBinder _ _) = False
+binderRequiresMonotype (NamedBinder _ _ b) = binderRequiresMonotype b
 binderRequiresMonotype (PositionedBinder _ _ b) = binderRequiresMonotype b
 binderRequiresMonotype (TypedBinder ty b) = isMonoType ty || binderRequiresMonotype b
 binderRequiresMonotype _ = True
@@ -619,39 +625,39 @@ check' val t@(ConstrainedType con@(Constraint (Qualified _ (ProperName className
   dictName <- freshIdent ("dict" <> className)
   dicts <- newDictionaries [] (Qualified Nothing dictName) con
   val' <- withBindingGroupVisible $ withTypeClassDictionaries dicts $ check val ty
-  return $ TypedValue True (Abs (VarBinder dictName) val') t
+  return $ TypedValue True (Abs (VarBinder nullSourceSpan dictName) val') t
 check' val u@(TUnknown _) = do
   val'@(TypedValue _ _ ty) <- infer val
   -- Don't unify an unknown with an inferred polytype
   (val'', ty') <- instantiatePolyTypeWithUnknowns val' ty
   unifyTypes ty' u
   return $ TypedValue True val'' ty'
-check' v@(Literal (NumericLiteral (Left _))) t | t == tyInt =
+check' v@(Literal _ (NumericLiteral (Left _))) t | t == tyInt =
   return $ TypedValue True v t
-check' v@(Literal (NumericLiteral (Right _))) t | t == tyNumber =
+check' v@(Literal _ (NumericLiteral (Right _))) t | t == tyNumber =
   return $ TypedValue True v t
-check' v@(Literal (StringLiteral _)) t | t == tyString =
+check' v@(Literal _ (StringLiteral _)) t | t == tyString =
   return $ TypedValue True v t
-check' v@(Literal (CharLiteral _)) t | t == tyChar =
+check' v@(Literal _ (CharLiteral _)) t | t == tyChar =
   return $ TypedValue True v t
-check' v@(Literal (BooleanLiteral _)) t | t == tyBoolean =
+check' v@(Literal _ (BooleanLiteral _)) t | t == tyBoolean =
   return $ TypedValue True v t
-check' (Literal (ArrayLiteral vals)) t@(TypeApp a ty) = do
+check' (Literal ss (ArrayLiteral vals)) t@(TypeApp a ty) = do
   unifyTypes a tyArray
-  array <- Literal . ArrayLiteral <$> forM vals (`check` ty)
+  array <- Literal ss . ArrayLiteral <$> forM vals (`check` ty)
   return $ TypedValue True array t
 check' (Abs binder ret) ty@(TypeApp (TypeApp t argTy) retTy)
-  | VarBinder arg <- binder = do
+  | VarBinder ss arg <- binder = do
       unifyTypes t tyFunction
       ret' <- withBindingGroupVisible $ bindLocalVariables [(arg, argTy, Defined)] $ check ret retTy
-      return $ TypedValue True (Abs (VarBinder arg) ret') ty
+      return $ TypedValue True (Abs (VarBinder ss arg) ret') ty
   | otherwise = internalError "Binder was not desugared"
 check' (App f arg) ret = do
   f'@(TypedValue _ _ ft) <- infer f
   (retTy, app) <- checkFunctionApplication f' ft arg
   elaborate <- subsumes retTy ret
   return $ TypedValue True (elaborate app) ret
-check' v@(Var var) ty = do
+check' v@(Var _ var) ty = do
   checkVisibility var
   repl <- introduceSkolemScope <=< replaceAllTypeSynonyms <=< lookupVariable $ var
   ty' <- introduceSkolemScope <=< replaceAllTypeSynonyms <=< replaceTypeWildcards $ ty
@@ -688,10 +694,10 @@ check' (IfThenElse cond th el) ty = do
   th' <- check th ty
   el' <- check el ty
   return $ TypedValue True (IfThenElse cond' th' el') ty
-check' e@(Literal (ObjectLiteral ps)) t@(TypeApp obj row) | obj == tyRecord = do
+check' e@(Literal ss (ObjectLiteral ps)) t@(TypeApp obj row) | obj == tyRecord = do
   ensureNoDuplicateProperties ps
   ps' <- checkProperties e ps row False
-  return $ TypedValue True (Literal (ObjectLiteral ps')) t
+  return $ TypedValue True (Literal ss (ObjectLiteral ps')) t
 check' (TypeClassDictionaryConstructorApp name ps) t = do
   ps' <- check' ps t
   return $ TypedValue True (TypeClassDictionaryConstructorApp name ps') t
@@ -709,7 +715,7 @@ check' (Accessor prop val) ty = withErrorMessageHint (ErrorCheckingAccessor val 
   rest <- freshType
   val' <- check val (TypeApp tyRecord (RCons (Label prop) ty rest))
   return $ TypedValue True (Accessor prop val') ty
-check' v@(Constructor c) ty = do
+check' v@(Constructor _ c) ty = do
   env <- getEnv
   case M.lookup c (dataConstructors env) of
     Nothing -> throwError . errorMessage . UnknownName . fmap DctorName $ c
@@ -718,9 +724,9 @@ check' v@(Constructor c) ty = do
       ty' <- introduceSkolemScope ty
       elaborate <- subsumes repl ty'
       return $ TypedValue True (elaborate v) ty'
-check' (Let ds val) ty = do
+check' (Let w ds val) ty = do
   (ds', val') <- inferLetBinding [] ds val (`check` ty)
-  return $ TypedValue True (Let ds' val') ty
+  return $ TypedValue True (Let w ds' val') ty
 check' val kt@(KindedType ty kind) = do
   checkTypeKind ty kind
   val' <- check' val ty

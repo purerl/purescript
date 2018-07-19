@@ -12,13 +12,15 @@
 -- Functions to access psc-ide's state
 -----------------------------------------------------------------------------
 
-{-# LANGUAGE PackageImports        #-}
-{-# LANGUAGE TemplateHaskell       #-}
-{-# LANGUAGE NamedFieldPuns        #-}
+{-# LANGUAGE PackageImports  #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE NamedFieldPuns  #-}
+{-# LANGUAGE BangPatterns    #-}
 
 module Language.PureScript.Ide.State
   ( getLoadedModulenames
   , getExternFiles
+  , getFileState
   , resetIdeState
   , cacheRebuild
   , cachedRebuild
@@ -27,6 +29,7 @@ module Language.PureScript.Ide.State
   , insertExternsSTM
   , getAllModules
   , populateVolatileState
+  , populateVolatileStateSync
   , populateVolatileStateSTM
   -- for tests
   , resolveOperatorsForModule
@@ -34,7 +37,7 @@ module Language.PureScript.Ide.State
   , resolveDataConstructorsForModule
   ) where
 
-import           Protolude
+import           Protolude hiding (moduleName)
 
 import           Control.Arrow
 import           Control.Concurrent.STM
@@ -42,6 +45,7 @@ import           Control.Lens                       hiding (op, (&))
 import           "monad-logger" Control.Monad.Logger
 import qualified Data.Map.Lazy                      as Map
 import qualified Language.PureScript                as P
+import           Language.PureScript.Docs.Convert.Single (convertComments)
 import           Language.PureScript.Externs
 import           Language.PureScript.Ide.Externs
 import           Language.PureScript.Ide.Reexports
@@ -111,12 +115,12 @@ setVolatileStateSTM ref vs = do
 -- | Checks if the given ModuleName matches the last rebuild cache and if it
 -- does returns all loaded definitions + the definitions inside the rebuild
 -- cache
-getAllModules :: Ide m => Maybe P.ModuleName -> m [(P.ModuleName, [IdeDeclarationAnn])]
+getAllModules :: Ide m => Maybe P.ModuleName -> m (ModuleMap [IdeDeclarationAnn])
 getAllModules mmoduleName = do
   declarations <- vsDeclarations <$> getVolatileState
   rebuild <- cachedRebuild
   case mmoduleName of
-    Nothing -> pure (Map.toList declarations)
+    Nothing -> pure declarations
     Just moduleName ->
       case rebuild of
         Just (cachedModulename, ef)
@@ -132,8 +136,8 @@ getAllModules mmoduleName = do
                 resolved =
                   Map.adjust (resolveOperatorsForModule tmp) moduleName tmp
 
-              pure (Map.toList resolved)
-        _ -> pure (Map.toList declarations)
+              pure resolved
+        _ -> pure declarations
 
 -- | Adds an ExternsFile into psc-ide's FileState. This does not populate the
 -- VolatileState, which needs to be done after all the necessary Externs and
@@ -163,14 +167,24 @@ cachedRebuild :: Ide m => m (Maybe (P.ModuleName, ExternsFile))
 cachedRebuild = vsCachedRebuild <$> getVolatileState
 
 -- | Resolves reexports and populates VolatileState with data to be used in queries.
-populateVolatileState :: (Ide m, MonadLogger m) => m ()
-populateVolatileState = do
+populateVolatileStateSync :: (Ide m, MonadLogger m) => m ()
+populateVolatileStateSync = do
   st <- ideStateVar <$> ask
-  let message duration = "Finished populating Stage3 in " <> displayTimeSpec duration
-  results <- logPerf message (liftIO (atomically (populateVolatileStateSTM st)))
+  let message duration = "Finished populating volatile state in: " <> displayTimeSpec duration
+  results <- logPerf message $ do
+    !r <- liftIO (atomically (populateVolatileStateSTM st))
+    pure r
   void $ Map.traverseWithKey
     (\mn -> logWarnN . prettyPrintReexportResult (const (P.runModuleName mn)))
     (Map.filter reexportHasFailures results)
+
+populateVolatileState :: (Ide m, MonadLogger m) => m (Async ())
+populateVolatileState = do
+  env <- ask
+  let ll = confLogLevel (ideConfiguration env)
+  -- populateVolatileState return Unit for now, so it's fine to discard this
+  -- result. We might want to block on this in a benchmarking situation.
+  liftIO (async (runLogger ll (runReaderT populateVolatileStateSync env)))
 
 -- | STM version of populateVolatileState
 populateVolatileStateSTM
@@ -178,6 +192,8 @@ populateVolatileStateSTM
   -> STM (ModuleMap (ReexportResult [IdeDeclarationAnn]))
 populateVolatileStateSTM ref = do
   IdeFileState{fsExterns = externs, fsModules = modules} <- getFileStateSTM ref
+  -- We're not using the cached rebuild for anything other than preserving it
+  -- through the repopulation
   rebuildCache <- vsCachedRebuild <$> getVolatileStateSTM ref
   let asts = map (extractAstInformation . fst) modules
   let (moduleDeclarations, reexportRefs) = (map fst &&& map snd) (Map.map convertExterns externs)
@@ -185,11 +201,12 @@ populateVolatileStateSTM ref = do
         moduleDeclarations
         & map resolveDataConstructorsForModule
         & resolveLocations asts
+        & resolveDocumentation (map fst modules)
         & resolveInstances externs
         & resolveOperators
         & resolveReexports reexportRefs
   setVolatileStateSTM ref (IdeVolatileState (AstData asts) (map reResolved results) rebuildCache)
-  pure results
+  pure (force results)
 
 resolveLocations
   :: ModuleMap (DefinitionSites P.SourceSpan, TypeAnnotations)
@@ -207,23 +224,7 @@ resolveLocationsForModule (defs, types) decls =
   map convertDeclaration decls
   where
     convertDeclaration :: IdeDeclarationAnn -> IdeDeclarationAnn
-    convertDeclaration (IdeDeclarationAnn ann d) = case d of
-      IdeDeclValue v ->
-        annotateFunction (v ^. ideValueIdent) (IdeDeclValue v)
-      IdeDeclType t ->
-        annotateType (t ^. ideTypeName . properNameT) (IdeDeclType t)
-      IdeDeclTypeSynonym s ->
-        annotateType (s ^. ideSynonymName . properNameT) (IdeDeclTypeSynonym s)
-      IdeDeclDataConstructor dtor ->
-        annotateValue (dtor ^. ideDtorName . properNameT) (IdeDeclDataConstructor dtor)
-      IdeDeclTypeClass tc ->
-        annotateType (tc ^. ideTCName . properNameT) (IdeDeclTypeClass tc)
-      IdeDeclValueOperator operator ->
-        annotateValue (operator ^. ideValueOpName . opNameT) (IdeDeclValueOperator operator)
-      IdeDeclTypeOperator operator ->
-        annotateType (operator ^. ideTypeOpName . opNameT) (IdeDeclTypeOperator operator)
-      IdeDeclKind i ->
-        annotateKind (i ^. properNameT) (IdeDeclKind i)
+    convertDeclaration (IdeDeclarationAnn ann d) = convertDeclaration' annotateFunction annotateValue annotateType annotateKind d
       where
         annotateFunction x = IdeDeclarationAnn (ann { _annLocation = Map.lookup (IdeNamespaced IdeNSValue (P.runIdent x)) defs
                                                     , _annTypeAnnotation = Map.lookup x types
@@ -231,6 +232,71 @@ resolveLocationsForModule (defs, types) decls =
         annotateValue x = IdeDeclarationAnn (ann {_annLocation = Map.lookup (IdeNamespaced IdeNSValue x) defs})
         annotateType x = IdeDeclarationAnn (ann {_annLocation = Map.lookup (IdeNamespaced IdeNSType x) defs})
         annotateKind x = IdeDeclarationAnn (ann {_annLocation = Map.lookup (IdeNamespaced IdeNSKind x) defs})
+
+convertDeclaration'
+  :: (P.Ident -> IdeDeclaration -> IdeDeclarationAnn)
+  -> (Text -> IdeDeclaration -> IdeDeclarationAnn)
+  -> (Text -> IdeDeclaration -> IdeDeclarationAnn)
+  -> (Text -> IdeDeclaration -> IdeDeclarationAnn)
+  -> IdeDeclaration
+  -> IdeDeclarationAnn
+convertDeclaration' annotateFunction annotateValue annotateType annotateKind d =
+  case d of
+    IdeDeclValue v ->
+      annotateFunction (v ^. ideValueIdent) d
+    IdeDeclType t ->
+      annotateType (t ^. ideTypeName . properNameT) d
+    IdeDeclTypeSynonym s ->
+      annotateType (s ^. ideSynonymName . properNameT) d
+    IdeDeclDataConstructor dtor ->
+      annotateValue (dtor ^. ideDtorName . properNameT) d
+    IdeDeclTypeClass tc ->
+      annotateType (tc ^. ideTCName . properNameT) d
+    IdeDeclValueOperator operator ->
+      annotateValue (operator ^. ideValueOpName . opNameT) d
+    IdeDeclTypeOperator operator ->
+      annotateType (operator ^. ideTypeOpName . opNameT) d
+    IdeDeclKind i ->
+      annotateKind (i ^. properNameT) d
+
+resolveDocumentation
+  :: ModuleMap P.Module
+  -> ModuleMap [IdeDeclarationAnn]
+  -> ModuleMap [IdeDeclarationAnn]
+resolveDocumentation modules =
+  Map.mapWithKey (\mn decls ->
+    maybe decls (flip resolveDocumentationForModule decls) (Map.lookup mn modules))
+
+resolveDocumentationForModule
+  :: P.Module
+    -> [IdeDeclarationAnn]
+    -> [IdeDeclarationAnn]
+resolveDocumentationForModule (P.Module _ _ _ sdecls _) decls = map convertDecl decls
+  where 
+  comments :: Map P.Name [P.Comment]
+  comments = Map.fromListWith (flip (<>)) $ mapMaybe (\d -> 
+    case name d of 
+      Just name' -> Just (name', snd $ P.declSourceAnn d)
+      _ -> Nothing)
+    sdecls 
+
+  name :: P.Declaration -> Maybe P.Name
+  name (P.TypeDeclaration d) = Just $ P.IdentName $ P.tydeclIdent d
+  name decl = P.declName decl
+
+  convertDecl :: IdeDeclarationAnn -> IdeDeclarationAnn
+  convertDecl (IdeDeclarationAnn ann d) = 
+    convertDeclaration'
+      (annotateValue . P.IdentName)
+      (annotateValue . P.IdentName . P.Ident) 
+      (annotateValue . P.TyName . P.ProperName)
+      (annotateValue . P.KiName . P.ProperName)
+      d
+    where
+      docs :: P.Name -> Text
+      docs ident = fromMaybe "" $ convertComments =<< Map.lookup ident comments
+
+      annotateValue ident = IdeDeclarationAnn (ann { _annDocumentation = Just $ docs ident })
 
 resolveInstances
   :: ModuleMap P.ExternsFile

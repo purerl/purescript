@@ -33,18 +33,19 @@ import Language.PureScript.CoreImp.Optimizer.Unused
 -- | Apply a series of optimizer passes to simplified JavaScript code
 optimize :: MonadSupply m => AST -> m AST
 optimize js = do
-    js' <- untilFixedPoint (inlineFnComposition . inlineUnsafePartial . tidyUp . applyAll
+    js' <- untilFixedPoint (inlineFnComposition . inlineUnsafeCoerce . inlineUnsafePartial . tidyUp . applyAll
       [ inlineCommonValues
       , inlineCommonOperators
       ]) js
-    untilFixedPoint (return . tidyUp) . tco . magicDo $ js'
+    untilFixedPoint (return . tidyUp) . tco . inlineST
+      =<< untilFixedPoint (return . magicDo')
+      =<< untilFixedPoint (return . magicDo) js'
   where
     tidyUp :: AST -> AST
     tidyUp = applyAll
       [ collapseNestedBlocks
       , collapseNestedIfs
       , removeCodeAfterReturnStatements
-      , removeUnusedArg
       , removeUndefinedApp
       , unThunk
       , etaConvert

@@ -37,8 +37,6 @@ import Language.PureScript.Traversals (sndM)
 import Language.PureScript.CodeGen.Erl.Common
 import Language.PureScript.CodeGen.Erl.Optimizer
 
-import Debug.Trace
-
 freshNameErl :: (MonadSupply m) => m T.Text
 freshNameErl = fmap (("_@" <>) . T.pack . show) fresh
 
@@ -69,13 +67,14 @@ moduleToErl :: forall m .
   => E.Environment
   -> Module Ann
   -> [(T.Text, Int)]
+  -> [(Ident, Type)]
   -> m ([T.Text], [Erl])
-moduleToErl env (Module _ mn _ _ foreigns decls) foreignExports =
+moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports foreignTypes =
   rethrow (addHint (ErrorInModule mn)) $ do
     res <- traverse topBindToErl decls
     let (exports, erlDecls) = biconcat $ res <> map reExportForeign foreigns
     optimized <- traverse optimize erlDecls
-    traverse_ checkExport foreigns
+    traverse_ checkExport foreignTypes
 
     let attributes = findAttributes decls
 
@@ -101,8 +100,8 @@ moduleToErl env (Module _ mn _ _ foreigns decls) foreignExports =
   arities :: M.Map (Qualified Ident) Int
   arities = M.map (\(t, _, _) -> tyArity t) $ E.names env
 
-  reExportForeign :: (Ident, Type) -> ([(Atom,Int)], [Erl])
-  reExportForeign (ident, _) =
+  reExportForeign :: Ident -> ([(Atom,Int)], [Erl])
+  reExportForeign ident =
     let arity = exportArity ident
         fullArity = fromMaybe 0 (M.lookup (Qualified (Just mn) ident) arities)
         args = map (\m -> "X" <> T.pack (show m)) [ 1..fullArity ]
@@ -121,7 +120,7 @@ moduleToErl env (Module _ mn _ _ foreigns decls) foreignExports =
   exportArity ident = fromMaybe 0 $ findExport $ runIdent ident
 
   checkExport :: (Ident, Type) -> m ()
-  checkExport (ident,ty) =
+  checkExport (ident, ty) =
     case (findExport (runIdent ident), tyArity ty) of
       (Just m, n) | m > n ->
         throwError . errorMessage $ InvalidFFIArity mn (runIdent ident) m n

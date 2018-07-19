@@ -9,15 +9,12 @@ module Language.PureScript.CodeGen.Erl.Optimizer (optimize) where
 
 import Prelude.Compat
 
-import Control.Monad.Reader (MonadReader, ask, asks)
 import Control.Monad.Supply.Class (MonadSupply)
 
 import Language.PureScript.CodeGen.Erl.AST
-import Language.PureScript.Options
 import Language.PureScript.CodeGen.Erl.Optimizer.MagicDo
 import Language.PureScript.CodeGen.Erl.Optimizer.Blocks
 import Language.PureScript.CodeGen.Erl.Optimizer.Common
-import Language.PureScript.CodeGen.Erl.Optimizer.Unused
 import Language.PureScript.CodeGen.Erl.Optimizer.Inliner
 import Language.PureScript.CodeGen.Erl.Optimizer.Guards
 
@@ -27,19 +24,22 @@ import Language.PureScript.CodeGen.Erl.Optimizer.Guards
 
 optimize :: MonadSupply m => Erl -> m Erl
 optimize erl = do
-  erl' <- untilFixedPoint (pure . tidyUp . applyAll
-    [ inlineCommonValues
-    , inlineCommonOperators
-    , evaluateIifes
-    ]) erl
-  untilFixedPoint (pure . tidyUp) . magicDo $ erl'
+    erl' <- untilFixedPoint (pure . tidyUp . applyAll
+      [ 
+        inlineCommonValues
+      , inlineCommonOperators
+      ]) erl
+    untilFixedPoint (pure . tidyUp)
+      =<< untilFixedPoint (return . magicDo')
+      =<< untilFixedPoint (return . magicDo) erl'
 
   where
   tidyUp :: Erl -> Erl
   tidyUp = applyAll
     [ collapseNestedBlocks
-    -- , removeUnusedArg
     , inlineSimpleGuards
+    , evaluateIifes
+    , etaConvert
     ]
 
 untilFixedPoint :: (Monad m, Eq a) => (a -> m a) -> a -> m a

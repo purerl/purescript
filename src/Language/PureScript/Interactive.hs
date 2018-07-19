@@ -14,9 +14,10 @@ import           Prelude.Compat
 import           Protolude (ordNub)
 
 import           Data.List (sort, find, foldl')
-import           Data.Maybe (mapMaybe)
+import           Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Map as M
 import           Data.Monoid ((<>))
+import qualified Data.Set as S
 import           Data.Text (Text)
 import qualified Data.Text as T
 
@@ -24,11 +25,12 @@ import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.State.Class
 import           Control.Monad.Reader.Class
 import           Control.Monad.Trans.Except (ExceptT(..), runExceptT)
-import           Control.Monad.Trans.State.Strict (StateT, runStateT)
+import           Control.Monad.Trans.State.Strict (StateT, runStateT, evalStateT)
 import           Control.Monad.Writer.Strict (Writer(), runWriter)
 
 import qualified Language.PureScript as P
 import qualified Language.PureScript.Names as N
+import qualified Language.PureScript.Constants as C
 
 import           Language.PureScript.Interactive.Completion   as Interactive
 import           Language.PureScript.Interactive.IO           as Interactive
@@ -110,6 +112,7 @@ handleCommand _ _ p (KindOf typ)              = handleKindOf p typ
 handleCommand _ _ p (BrowseModule moduleName) = handleBrowse p moduleName
 handleCommand _ _ p (ShowInfo QueryLoaded)    = handleShowLoadedModules p
 handleCommand _ _ p (ShowInfo QueryImport)    = handleShowImportedModules p
+handleCommand _ _ p (CompleteStr prefix)      = handleComplete p prefix
 handleCommand _ _ _ _                         = P.internalError "handleCommand: unexpected command"
 
 -- | Reload the application state
@@ -166,7 +169,7 @@ handleDecls
   -> m ()
 handleDecls ds = do
   st <- gets (updateLets (++ ds))
-  let m = createTemporaryModule False st (P.Literal (P.ObjectLiteral []))
+  let m = createTemporaryModule False st (P.Literal P.nullSourceSpan (P.ObjectLiteral []))
   e <- liftIO . runMake $ rebuild (map snd (psciLoadedExterns st)) m
   case e of
     Left err -> printErrors err
@@ -189,9 +192,8 @@ handleShowImportedModules
   => (String -> m ())
   -> m ()
 handleShowImportedModules print' = do
-  PSCiState { psciImportedModules = importedModules } <- get
+  importedModules <- psciImportedModules <$> get
   print' $ showModules importedModules
-  return ()
   where
   showModules = unlines . sort . map (T.unpack . showModule)
   showModule (mn, declType, asQ) =
@@ -291,19 +293,29 @@ handleBrowse
 handleBrowse print' moduleName = do
   st <- get
   env <- asks psciEnvironment
-  if isModInEnv moduleName st
-    then print' $ printModuleSignatures moduleName env
-    else case lookupUnQualifiedModName moduleName st of
-      Just unQualifiedName ->
-        if isModInEnv unQualifiedName st
-          then print' $ printModuleSignatures unQualifiedName env
-          else failNotInEnv moduleName
-      Nothing ->
-        failNotInEnv moduleName
+  case findMod moduleName (psciLoadedExterns st) (psciImportedModules st) of
+    Just qualName -> print' $ printModuleSignatures qualName env
+    Nothing       -> failNotInEnv moduleName
   where
-    isModInEnv modName =
-        any ((== modName) . P.getModuleName . fst) . psciLoadedExterns
-    failNotInEnv modName =
-        print' $ T.unpack $ "Module '" <> N.runModuleName modName <> "' is not valid."
-    lookupUnQualifiedModName quaModName st =
-        (\(modName,_,_) -> modName) <$> find ( \(_, _, mayQuaName) -> mayQuaName == Just quaModName) (psciImportedModules st)
+    findMod needle externs imports =
+      let qualMod = fromMaybe needle (lookupUnQualifiedModName needle imports)
+          modules = S.fromList (C.primModules <> (P.getModuleName . fst <$> externs))
+      in if qualMod `S.member` modules
+           then Just qualMod
+           else Nothing
+
+    failNotInEnv modName = print' $ T.unpack $ "Module '" <> N.runModuleName modName <> "' is not valid."
+    lookupUnQualifiedModName needle imports =
+        (\(modName,_,_) -> modName) <$> find (\(_,_,mayQuaName) -> mayQuaName == Just needle) imports
+
+-- | Return output as would be returned by tab completion, for tools integration etc.
+handleComplete
+  :: (MonadState PSCiState m, MonadIO m)
+  => (String -> m ())
+  -> String
+  -> m ()
+handleComplete print' prefix = do
+  st <- get
+  let act = liftCompletionM (completion' (reverse prefix, ""))
+  results <- evalStateT act st
+  print' $ unlines (formatCompletions results)

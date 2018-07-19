@@ -15,6 +15,7 @@ If you would prefer to use different terms, please use the section below instead
 | Username | Name | License |
 | :------- | :--- | :------ |
 | [@5outh](https://github.com/5outh) | Benjamin Kovach | MIT license |
+| [@actionshrimp](https://github.com/actionshrimp) | David Aitken | [MIT license](http://opensource.org/licenses/MIT) |
 | [@alexbiehl](https://github.com/alexbiehl) | Alexander Biehl | [MIT license](http://opensource.org/licenses/MIT) |
 | [@andreypopp](https://github.com/andreypopp) | Andrey Popp | MIT license |
 | [@andyarvanitis](https://github.com/andyarvanitis) | Andy Arvanitis | [MIT license](http://opensource.org/licenses/MIT) |
@@ -25,14 +26,17 @@ If you would prefer to use different terms, please use the section below instead
 | [@balajirrao](https://github.com/balajirrao) | Balaji Rao | MIT license |
 | [@bbqbaron](https://github.com/bbqbaron) | Eric Loren | [MIT license](http://opensource.org/licenses/MIT) |
 | [@bergmark](https://github.com/bergmark) | Adam Bergmark | MIT license |
+| [@bitemyapp](https://github.com/bitemyapp) | Chris Allen | [MIT license](http://opensource.org/licenses/MIT) |
 | [@bmjames](https://github.com/bmjames) | Ben James | [MIT license](http://opensource.org/licenses/MIT) |
 | [@Bogdanp](https://github.com/Bogdanp) | Bogdan Paul Popa | [MIT license](http://opensource.org/licenses/MIT) |
 | [@brandonhamilton](https://github.com/brandonhamilton) | Brandon Hamilton | [MIT license](http://opensource.org/licenses/MIT) |
 | [@bsermons](https://github.com/bsermons) | Brian Sermons | [MIT license](http://opensource.org/licenses/MIT) |
 | [@cdepillabout](https://github.com/cdepillabout) | Dennis Gosnell | [MIT license](http://opensource.org/licenses/MIT) |
+| [@chexxor](https://github.com/chexxor) | Alex Berg | [MIT license](http://opensource.org/licenses/MIT) |
 | [@chrisdone](https://github.com/chrisdone) | Chris Done | MIT license |
 | [@cmdv](https://github.com/cmdv) | Vincent Orr | MIT license |
 | [@codedmart](https://github.com/codedmart) | Brandon Martin | [MIT license](http://opensource.org/licenses/MIT) |
+| [@coot](https://github.com/coot) | Marcin Szamotulski | [MIT license](http://opensource.org/licenses/MIT) |
 | [@davidchambers](https://github.com/davidchambers) | David Chambers | [MIT license](http://opensource.org/licenses/MIT) |
 | [@DavidLindbom](https://github.com/DavidLindbom) | David Lindbom | [MIT license](http://opensource.org/licenses/MIT) |
 | [@dckc](https://github.com/dckc) | Dan Connolly | [MIT license](http://opensource.org/licenses/MIT) |
@@ -42,6 +46,7 @@ If you would prefer to use different terms, please use the section below instead
 | [@erdeszt](https://github.com/erdeszt) | Tibor Erdesz | [MIT license](http://opensource.org/licenses/MIT) |
 | [@etrepum](https://github.com/etrepum) | Bob Ippolito | [MIT license](http://opensource.org/licenses/MIT) |
 | [@faineance](https://github.com/faineance) | faineance | [MIT license](http://opensource.org/licenses/MIT) |
+| [@fehrenbach](https://github.com/fehrenbach) | Stefan Fehrenbach | [MIT license](http://opensource.org/licenses/MIT) |
 | [@felixSchl](https://github.com/felixSchl) | Felix Schlitter | [MIT license](http://opensource.org/licenses/MIT) |
 | [@FrigoEU](https://github.com/FrigoEU) | Simon Van Casteren | [MIT license](http://opensource.org/licenses/MIT) |
 | [@garyb](https://github.com/garyb) | Gary Burgess | [MIT license](http://opensource.org/licenses/MIT) |
@@ -49,9 +54,11 @@ If you would prefer to use different terms, please use the section below instead
 | [@houli](https://github.com/houli) | Eoin Houlihan | [MIT license](http://opensource.org/licenses/MIT) |
 | [@ianbollinger](https://github.com/ianbollinger) | Ian D. Bollinger | [MIT license](http://opensource.org/licenses/MIT) |
 | [@ilovezfs](https://github.com/ilovezfs) | ilovezfs | MIT license |
+| [@i-am-tom](https://github.com/i-am-tom) | i-am-tom | [MIT license](http://opensource.org/licenses/MIT)  |
 | [@izgzhen](https://github.com/izgzhen) | Zhen Zhang | [MIT license](http://opensource.org/licenses/MIT) |
 | [@jacereda](https://github.com/jacereda) | Jorge Acereda | [MIT license](http://opensource.org/licenses/MIT) |
 | [@japesinator](https://github.com/japesinator) | JP Smith | [MIT license](http://opensource.org/licenses/MIT) |
+| [@jkachmar](https://github.com/jkachmar) | Joe Kachmar | MIT license |
 | [@joneshf](https://github.com/joneshf) | Hardy Jones | MIT license |
 | [@kika](https://github.com/kika) | Kirill Pertsev | MIT license |
 | [@kRITZCREEK](https://github.com/kRITZCREEK) | Christoph Hegemann | MIT license |
@@ -61,6 +68,7 @@ If you would prefer to use different terms, please use the section below instead
 | [@lukerandall](https://github.com/lukerandall) | Luke Randall | [MIT license](http://opensource.org/licenses/MIT) |
 | [@matthewleon](https://github.com/matthewleon) | Matthew Leon | [MIT license](http://opensource.org/licenses/MIT) |
 | [@mcoffin](https://github.com/mcoffin) | Matt Coffin | [MIT license](http://opensource.org/licenses/MIT) |
+| [@MiracleBlue](https://github.com/MiracleBlue) | Nicholas Kircher | [MIT license](http://opensource.org/licenses/MIT) |
 | [@mrkgnao](https://github.com/mrkgnao) | Soham Chowdhury | [MIT license](http://opensource.org/licenses/MIT) |
 | [@mgmeier](https://github.com/mgmeier) | Michael Gilliland | [MIT license](http://opensource.org/licenses/MIT) |
 | [@michaelficarra](https://github.com/michaelficarra) | Michael Ficarra | [MIT license](http://opensource.org/licenses/MIT) |
@@ -75,6 +83,7 @@ If you would prefer to use different terms, please use the section below instead
 | [@nwolverson](https://github.com/nwolverson) | Nicholas Wolverson | [MIT license](http://opensource.org/licenses/MIT) |
 | [@osa1](https://github.com/osa1) | Ömer Sinan Ağacan | MIT license |
 | [@paf31](https://github.com/paf31) | Phil Freeman | [MIT license](http://opensource.org/licenses/MIT) |
+| [@parsonsmatt](https://github.com/parsonsmatt) | Matt Parsons | [MIT license](http://opensource.org/licenses/MIT) |
 | [@passy](https://github.com/passy) | Pascal Hartig | [MIT license](http://opensource.org/licenses/MIT) |
 | [@paulyoung](https://github.com/paulyoung) | Paul Young | [MIT license](http://opensource.org/licenses/MIT) |
 | [@pelotom](https://github.com/pelotom) | Thomas Crockett | [MIT license](http://opensource.org/licenses/MIT) |
@@ -82,7 +91,9 @@ If you would prefer to use different terms, please use the section below instead
 | [@phiggins](https://github.com/phiggins) | Pete Higgins | [MIT license](http://opensource.org/licenses/MIT) |
 | [@philopon](https://github.com/philopon) | Hirotomo Moriwaki | [MIT license](http://opensource.org/licenses/MIT) |
 | [@pseudonom](https://github.com/pseudonom) | Eric Easley | [MIT license](http://opensource.org/licenses/MIT) |
+| [@quesebifurcan](https://github.com/quesebifurcan) | Fredrik Wallberg | [MIT license](http://opensource.org/licenses/MIT) |
 | [@rightfold](https://github.com/rightfold) | rightfold | [MIT license](https://opensource.org/licenses/MIT) |
+| [@rndnoise](https://github.com/rndnoise) | rndnoise | [MIT license](http://opensource.org/licenses/MIT) |
 | [@robdaemon](https://github.com/robdaemon) | Robert Roland | [MIT license](http://opensource.org/licenses/MIT) |
 | [@RossMeikleham](https://github.com/RossMeikleham) | Ross Meikleham | [MIT license](http://opensource.org/licenses/MIT) |
 | [@Rufflewind](https://github.com/Rufflewind) | Phil Ruffwind | [MIT license](https://opensource.org/licenses/MIT) |
@@ -105,7 +116,16 @@ If you would prefer to use different terms, please use the section below instead
 | [@trofi](https://github.com/trofi) | Sergei Trofimovich | [MIT license](http://opensource.org/licenses/MIT) |
 | [@utkarshkukreti](https://github.com/utkarshkukreti) | Utkarsh Kukreti | [MIT license](http://opensource.org/licenses/MIT) |
 | [@vkorablin](https://github.com/vkorablin) | Vladimir Korablin | MIT license |
+| [@vladciobanu](https://github.com/vladciobanu) | Vladimir Ciobanu | [MIT license](http://opensource.org/licenses/MIT) |
 | [@zudov](https://github.com/zudov) | Konstantin Zudov | [MIT license](http://opensource.org/licenses/MIT) |
+| [@b123400](https://github.com/b123400) | b123400 | [MIT license](https://opensource.org/licenses/MIT) |
+| [@kcsongor](https://github.com/kcsongor) | Csongor Kiss | [MIT license](http://opensource.org/licenses/MIT) |
+| [@drets](https://github.com/drets) | Dmytro Rets | [MIT license](http://opensource.org/licenses/MIT) |
+| [@bjornmelgaaard](https://github.com/BjornMelgaard) | Sergey Homa | [MIT license](http://opensource.org/licenses/MIT) |
+| [@thimoteus](https://github.com/Thimoteus) | thimoteus | [MIT license](http://opensource.org/licenses/MIT) |
+| [@sloosch](https://github.com/sloosch) | Simon Looschen | [MIT license](http://opensource.org/licenses/MIT) |
+| [@rgrinberg](https://github.com/rgrinberg) | Rudi Grinberg | [MIT license](http://opensource.org/licenses/MIT) |
+| [@gabejohnson](https://github.com/gabejohnson) | Gabe Johnson | [MIT license](http://opensource.org/licenses/MIT) |
 
 ### Contributors using Modified Terms
 

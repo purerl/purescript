@@ -34,27 +34,27 @@ findExportable (Module _ _ mn ds _) =
 
   updateExports :: Exports -> Declaration -> m Exports
   updateExports exps (TypeClassDeclaration (ss, _) tcn _ _ _ ds') = do
-    exps' <- rethrowWithPosition ss $ exportTypeClass Internal exps tcn mn
+    exps' <- rethrowWithPosition ss $ exportTypeClass ss Internal exps tcn mn
     foldM go exps' ds'
     where
-    go exps'' (TypeDeclaration (ss', _) name _) = rethrowWithPosition ss' $ exportValue exps'' name mn
+    go exps'' (TypeDeclaration (TypeDeclarationData (ss', _) name _)) = exportValue ss' exps'' name mn
     go _ _ = internalError "Invalid declaration in TypeClassDeclaration"
-  updateExports exps (DataDeclaration _ _ tn _ dcs) =
-    exportType Internal exps tn (map fst dcs) mn
-  updateExports exps (TypeSynonymDeclaration _ tn _ _) =
-    exportType Internal exps tn [] mn
-  updateExports exps (ExternDataDeclaration _ tn _) =
-    exportType Internal exps tn [] mn
-  updateExports exps (ValueDeclaration _ name _ _ _) =
-    exportValue exps name mn
-  updateExports exps (ValueFixityDeclaration _ _ _ op) =
-    exportValueOp exps op mn
-  updateExports exps (TypeFixityDeclaration _ _ _ op) =
-    exportTypeOp exps op mn
-  updateExports exps (ExternDeclaration _ name _) =
-    exportValue exps name mn
-  updateExports exps (ExternKindDeclaration _ pn) =
-    exportKind exps pn mn
+  updateExports exps (DataDeclaration (ss, _) _ tn _ dcs) =
+    exportType ss Internal exps tn (map fst dcs) mn
+  updateExports exps (TypeSynonymDeclaration (ss, _) tn _ _) =
+    exportType ss Internal exps tn [] mn
+  updateExports exps (ExternDataDeclaration (ss, _) tn _) =
+    exportType ss Internal exps tn [] mn
+  updateExports exps (ValueDeclaration vd) =
+    exportValue (fst (valdeclSourceAnn vd)) exps (valdeclIdent vd) mn
+  updateExports exps (ValueFixityDeclaration (ss, _) _ _ op) =
+    exportValueOp ss exps op mn
+  updateExports exps (TypeFixityDeclaration (ss, _) _ _ op) =
+    exportTypeOp ss exps op mn
+  updateExports exps (ExternDeclaration (ss, _) name _) =
+    exportValue ss exps name mn
+  updateExports exps (ExternKindDeclaration (ss, _) pn) =
+    exportKind ss exps pn mn
   updateExports exps _ = return exps
 
 -- |
@@ -103,34 +103,35 @@ resolveExports env ss mn imps exps refs =
     let isPseudo = isPseudoModule name
     when (not isPseudo && not (isImportedModule name))
       . throwError . errorMessage' ss' . UnknownExport $ ModName name
-    reTypes <- extract isPseudo name TyName (importedTypes imps)
-    reTypeOps <- extract isPseudo name TyOpName (importedTypeOps imps)
-    reDctors <- extract isPseudo name DctorName (importedDataConstructors imps)
-    reClasses <- extract isPseudo name TyClassName (importedTypeClasses imps)
-    reValues <- extract isPseudo name IdentName (importedValues imps)
-    reValueOps <- extract isPseudo name ValOpName (importedValueOps imps)
-    reKinds <- extract isPseudo name KiName (importedKinds imps)
-    foldM (\exps' ((tctor, dctors), mn') -> exportType ReExport exps' tctor dctors mn') result (resolveTypeExports reTypes reDctors)
-      >>= flip (foldM (uncurry . exportTypeOp)) (map resolveTypeOp reTypeOps)
-      >>= flip (foldM (uncurry . exportTypeClass ReExport)) (map resolveClass reClasses)
-      >>= flip (foldM (uncurry . exportValue)) (map resolveValue reValues)
-      >>= flip (foldM (uncurry . exportValueOp)) (map resolveValueOp reValueOps)
-      >>= flip (foldM (uncurry . exportKind)) (map resolveKind reKinds)
+    reTypes <- extract ss' isPseudo name TyName (importedTypes imps)
+    reTypeOps <- extract ss' isPseudo name TyOpName (importedTypeOps imps)
+    reDctors <- extract ss' isPseudo name DctorName (importedDataConstructors imps)
+    reClasses <- extract ss' isPseudo name TyClassName (importedTypeClasses imps)
+    reValues <- extract ss' isPseudo name IdentName (importedValues imps)
+    reValueOps <- extract ss' isPseudo name ValOpName (importedValueOps imps)
+    reKinds <- extract ss' isPseudo name KiName (importedKinds imps)
+    foldM (\exps' ((tctor, dctors), mn') -> exportType ss' ReExport exps' tctor dctors mn') result (resolveTypeExports reTypes reDctors)
+      >>= flip (foldM (uncurry . exportTypeOp ss')) (map resolveTypeOp reTypeOps)
+      >>= flip (foldM (uncurry . exportTypeClass ss' ReExport)) (map resolveClass reClasses)
+      >>= flip (foldM (uncurry . exportValue ss')) (map resolveValue reValues)
+      >>= flip (foldM (uncurry . exportValueOp ss')) (map resolveValueOp reValueOps)
+      >>= flip (foldM (uncurry . exportKind ss')) (map resolveKind reKinds)
   elaborateModuleExports result _ = return result
 
   -- Extracts a list of values for a module based on a lookup table. If the
   -- boolean is true the values are filtered by the qualification
   extract
-    :: Bool
+    :: SourceSpan
+    -> Bool
     -> ModuleName
     -> (a -> Name)
     -> M.Map (Qualified a) [ImportRecord a]
     -> m [Qualified a]
-  extract useQual name toName = fmap (map (importName . head . snd)) . go . M.toList
+  extract ss' useQual name toName = fmap (map (importName . head . snd)) . go . M.toList
     where
     go = filterM $ \(name', options) -> do
       let isMatch = if useQual then isQualifiedWith name name' else any (checkUnqual name') options
-      when (isMatch && length options > 1) $ void $ checkImportConflicts mn toName options
+      when (isMatch && length options > 1) $ void $ checkImportConflicts ss' mn toName options
       return isMatch
     checkUnqual name' ir = isUnqualified name' && isQualifiedWith name (importName ir)
 

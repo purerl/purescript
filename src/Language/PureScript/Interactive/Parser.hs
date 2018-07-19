@@ -2,11 +2,14 @@
 -- Parser for PSCI.
 --
 module Language.PureScript.Interactive.Parser
-  ( parseCommand
+  ( parseDotFile
+  , parseCommand
   ) where
 
 import           Prelude.Compat hiding (lex)
 
+import           Control.Applicative ((<|>))
+import           Control.Monad (join)
 import           Data.Bifunctor (first)
 import           Data.Char (isSpace)
 import           Data.List (intercalate)
@@ -16,6 +19,16 @@ import qualified Language.PureScript as P
 import qualified Language.PureScript.Interactive.Directive as D
 import           Language.PureScript.Interactive.Types
 import           Language.PureScript.Parser.Common (mark, same)
+
+-- |
+-- Parses a limited set of commands from from .purs-repl
+--
+parseDotFile :: FilePath -> String -> Either String [Command]
+parseDotFile filePath s = first show $ do
+  ts <- P.lex filePath (T.pack s)
+  P.runTokenParser filePath (many parser <* eof) ts
+  where
+  parser  = psciImport <|> fail "The .purs-repl file only supports import declarations"
 
 -- |
 -- Parses PSCI metacommands or expressions input from the user.
@@ -58,18 +71,19 @@ parseDirective cmd =
     ds       -> Left ("Ambiguous directive. Possible matches: " ++
                   intercalate ", " (map snd ds) ++ ". Type :? for help.")
   where
-  (dstr, arg) = break isSpace cmd
+  (dstr, arg) = trim <$> break isSpace cmd
 
   commandFor d = case d of
-    Help    -> return ShowHelp
-    Quit    -> return QuitPSCi
-    Reload  -> return ReloadState
-    Clear   -> return ClearState
-    Paste   -> return PasteLines
-    Browse  -> BrowseModule <$> parseRest P.moduleName arg
-    Show    -> ShowInfo <$> parseReplQuery' (trim arg)
-    Type    -> TypeOf <$> parseRest P.parseValue arg
-    Kind    -> KindOf <$> parseRest P.parseType arg
+    Help     -> return ShowHelp
+    Quit     -> return QuitPSCi
+    Reload   -> return ReloadState
+    Clear    -> return ClearState
+    Paste    -> return PasteLines
+    Browse   -> BrowseModule <$> parseRest P.moduleName arg
+    Show     -> ShowInfo <$> parseReplQuery' arg
+    Type     -> TypeOf <$> parseRest P.parseValue arg
+    Kind     -> KindOf <$> parseRest P.parseType arg
+    Complete -> return (CompleteStr arg)
 
 -- |
 -- Parses expressions entered at the PSCI repl.
@@ -87,11 +101,12 @@ psciImport = do
 -- | Any declaration that we don't need a 'special case' parser for
 -- (like import declarations).
 psciDeclaration :: P.TokenParser Command
-psciDeclaration = fmap Decls $ mark $ many1 $ same *> do
-  decl <- P.parseDeclaration
-  if acceptable decl
-    then return decl
-    else fail "this kind of declaration is not supported in psci"
+psciDeclaration = fmap Decls $ mark $ fmap join (many1 $ same *>
+  (traverse accept =<< P.parseDeclaration))
+  where
+  accept decl
+    | acceptable decl = return decl
+    | otherwise = fail "this kind of declaration is not supported in psci"
 
 acceptable :: P.Declaration -> Bool
 acceptable P.DataDeclaration{} = True

@@ -2,6 +2,7 @@ module Language.PureScript.Sugar.Names
   ( desugarImports
   , desugarImportsWithEnv
   , Env
+  , primEnv
   , ImportRecord(..)
   , ImportProvenance(..)
   , Imports(..)
@@ -9,7 +10,7 @@ module Language.PureScript.Sugar.Names
   ) where
 
 import Prelude.Compat
-import Protolude (ordNub)
+import Protolude (ordNub, sortBy, on)
 
 import Control.Arrow (first)
 import Control.Monad
@@ -118,13 +119,17 @@ desugarImportsWithEnv externs modules = do
       return m''
 
 -- |
--- Make all exports for a module explicit. This may still effect modules that
+-- Make all exports for a module explicit. This may still affect modules that
 -- have an exports list, as it will also make all data constructor exports
 -- explicit.
 --
+-- The exports will appear in the same order as they do in the existing exports
+-- list, or if there is no export list, declarations are order based on their
+-- order of appearance in the module.
+--
 elaborateExports :: Exports -> Module -> Module
 elaborateExports exps (Module ss coms mn decls refs) =
-  Module ss coms mn decls $ Just
+  Module ss coms mn decls $ Just $ reorderExports decls refs
     $ elaboratedTypeRefs
     ++ go (TypeOpRef ss) exportedTypeOps
     ++ go (TypeClassRef ss) exportedTypeClasses
@@ -144,6 +149,22 @@ elaborateExports exps (Module ss coms mn decls refs) =
   go toRef select =
     flip map (M.toList (select exps)) $ \(export, mn') ->
       if mn == mn' then toRef export else ReExportRef ss mn' (toRef export)
+
+-- |
+-- Given a list of declarations, an original exports list, and an elaborated
+-- exports list, reorder the elaborated list so that it matches the original
+-- order. If there is no original exports list, reorder declarations based on
+-- their order in the source file.
+reorderExports :: [Declaration] -> Maybe [DeclarationRef] -> [DeclarationRef] -> [DeclarationRef]
+reorderExports decls originalRefs =
+  sortBy (compare `on` originalIndex)
+  where
+  names =
+    maybe (mapMaybe declName decls) (map declRefName) originalRefs
+  namesMap =
+    M.fromList $ zip names [(0::Int)..]
+  originalIndex ref =
+    M.lookup (declRefName ref) namesMap
 
 -- |
 -- Replaces all local names with qualified names within a module and checks that all existing
@@ -189,16 +210,16 @@ renameInModule imports (Module modSS coms mn decls exps) =
         <*> updateConstraints ss implies
         <*> pure deps
         <*> pure ds
-  updateDecl bound (TypeInstanceDeclaration sa@(ss, _) name cs cn ts ds) =
+  updateDecl bound (TypeInstanceDeclaration sa@(ss, _) ch idx name cs cn ts ds) =
     fmap (bound,) $
-      TypeInstanceDeclaration sa name
+      TypeInstanceDeclaration sa ch idx name
         <$> updateConstraints ss cs
         <*> updateClassName cn ss
         <*> traverse (updateTypesEverywhere ss) ts
         <*> pure ds
-  updateDecl bound (TypeDeclaration sa@(ss, _) name ty) =
+  updateDecl bound (TypeDeclaration (TypeDeclarationData sa@(ss, _) name ty)) =
     fmap (bound,) $
-      TypeDeclaration sa name
+      TypeDeclaration . TypeDeclarationData sa name
         <$> updateTypesEverywhere ss ty
   updateDecl bound (ExternDeclaration sa@(ss, _) name ty) =
     fmap (name : bound,) $
@@ -232,21 +253,21 @@ renameInModule imports (Module modSS coms mn decls exps) =
     -> m ((SourceSpan, [Ident]), Expr)
   updateValue (_, bound) v@(PositionedValue pos' _ _) =
     return ((pos', bound), v)
-  updateValue (pos, bound) (Abs (VarBinder arg) val') =
-    return ((pos, arg : bound), Abs (VarBinder arg) val')
-  updateValue (pos, bound) (Let ds val') = do
+  updateValue (pos, bound) (Abs (VarBinder ss arg) val') =
+    return ((pos, arg : bound), Abs (VarBinder ss arg) val')
+  updateValue (pos, bound) (Let w ds val') = do
     let args = mapMaybe letBoundVariable ds
     unless (length (ordNub args) == length args) .
       throwError . errorMessage' pos $ OverlappingNamesInLet
-    return ((pos, args ++ bound), Let ds val')
-  updateValue (pos, bound) (Var name'@(Qualified Nothing ident)) | ident `notElem` bound =
-    (,) (pos, bound) <$> (Var <$> updateValueName name' pos)
-  updateValue (pos, bound) (Var name'@(Qualified (Just _) _)) =
-    (,) (pos, bound) <$> (Var <$> updateValueName name' pos)
-  updateValue (pos, bound) (Op op) =
-    (,) (pos, bound) <$> (Op <$> updateValueOpName op pos)
-  updateValue s@(pos, _) (Constructor name) =
-    (,) s <$> (Constructor <$> updateDataConstructorName name pos)
+    return ((pos, args ++ bound), Let w ds val')
+  updateValue (_, bound) (Var ss name'@(Qualified Nothing ident)) | ident `notElem` bound =
+    (,) (ss, bound) <$> (Var ss <$> updateValueName name' ss)
+  updateValue (_, bound) (Var ss name'@(Qualified (Just _) _)) =
+    (,) (ss, bound) <$> (Var ss <$> updateValueName name' ss)
+  updateValue (_, bound) (Op ss op) =
+    (,) (ss, bound) <$> (Op ss <$> updateValueOpName op ss)
+  updateValue (_, bound) (Constructor ss name) =
+    (,) (ss, bound) <$> (Constructor ss <$> updateDataConstructorName name ss)
   updateValue s@(pos, _) (TypedValue check val ty) =
     (,) s <$> (TypedValue check val <$> updateTypesEverywhere pos ty)
   updateValue s v = return (s, v)
@@ -257,10 +278,10 @@ renameInModule imports (Module modSS coms mn decls exps) =
     -> m ((SourceSpan, [Ident]), Binder)
   updateBinder (_, bound) v@(PositionedBinder pos _ _) =
     return ((pos, bound), v)
-  updateBinder s@(pos, _) (ConstructorBinder name b) =
-    (,) s <$> (ConstructorBinder <$> updateDataConstructorName name pos <*> pure b)
-  updateBinder s@(pos, _) (OpBinder op) =
-    (,) s <$> (OpBinder <$> updateValueOpName op pos)
+  updateBinder (_, bound) (ConstructorBinder ss name b) =
+    (,) (ss, bound) <$> (ConstructorBinder ss <$> updateDataConstructorName name ss <*> pure b)
+  updateBinder (_, bound) (OpBinder ss op) =
+    (,) (ss, bound) <$> (OpBinder ss <$> updateValueOpName op ss)
   updateBinder s@(pos, _) (TypedBinder t b) = do
     t' <- updateTypesEverywhere pos t
     return (s, TypedBinder t' b)
@@ -283,8 +304,7 @@ renameInModule imports (Module modSS coms mn decls exps) =
         updatePatGuard _                  = []
 
   letBoundVariable :: Declaration -> Maybe Ident
-  letBoundVariable (ValueDeclaration _ ident _ _ _) = Just ident
-  letBoundVariable _ = Nothing
+  letBoundVariable = fmap valdeclIdent . getValueDeclaration
 
   updateKindsEverywhere :: SourceSpan -> Kind -> m Kind
   updateKindsEverywhere pos = everywhereOnKindsM updateKind
@@ -377,7 +397,7 @@ renameInModule imports (Module modSS coms mn decls exps) =
       -- re-exports. If there are multiple options for the name to resolve to
       -- in scope, we throw an error.
       (Just options, _) -> do
-        (mnNew, mnOrig) <- checkImportConflicts mn toName options
+        (mnNew, mnOrig) <- checkImportConflicts pos mn toName options
         modify $ \usedImports ->
           M.insertWith (++) mnNew [fmap toName qname] usedImports
         return $ Qualified (Just mnOrig) name

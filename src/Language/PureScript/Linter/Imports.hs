@@ -82,7 +82,7 @@ lintImports (Module _ _ mn mdecls (Just mexports)) env usedImps = do
         let names = ordNub $ M.findWithDefault [] mni usedImps'
             usedRefs = findUsedRefs ss env mni (Just mnq) names
         unless (null usedRefs) .
-          tell . errorMessage' ss $ ImplicitQualifiedImport mni mnq usedRefs
+          tell . errorMessage' ss $ ImplicitQualifiedImport mni mnq $ map (simplifyTypeRef $ const True) usedRefs
 
   for_ imports $ \(mnq, imps) -> do
 
@@ -105,6 +105,23 @@ lintImports (Module _ _ mn mdecls (Just mexports)) env usedImps = do
         Explicit refs -> refs
         Hiding refs -> refs
         _ -> []
+
+  -- Check re-exported modules to see if we are re-exporting a qualified module
+  -- that has unspecified imports.
+  for_ mexports $ \case
+    ModuleRef _ mnq ->
+      case M.lookup mnq (byQual imports) of
+        -- We only match the single-entry case here as otherwise there will be
+        -- a different warning about implicit imports potentially colliding
+        -- anyway
+        Just [(ss, Implicit, mni)] -> do
+          let names = ordNub $ M.findWithDefault [] mni usedImps'
+              usedRefs = findUsedRefs ss env mni (Just mnq) names
+          tell . errorMessage' ss $
+            ImplicitQualifiedImportReExport mni mnq
+              $ map (simplifyTypeRef $ const True) usedRefs
+        _ -> pure ()
+    _ -> pure ()
 
   where
 
@@ -183,6 +200,17 @@ lintImports (Module _ _ mn mdecls (Just mexports)) env usedImps = do
             _ -> internalError "unqualified name in extractByQual"
     go _ = Nothing
 
+
+-- Replace explicit type refs with data constructor lists from listing the
+-- used constructors explicity `T(X, Y, [...])` to `T(..)` for suggestion
+-- message.
+-- Done everywhere when suggesting a completely new explicit imports list, otherwise
+-- maintain the existing form.
+simplifyTypeRef :: (ProperName 'TypeName -> Bool) -> DeclarationRef -> DeclarationRef
+simplifyTypeRef shouldOpen (TypeRef ss name (Just dctors))
+  | not (null dctors) && shouldOpen name = TypeRef ss name Nothing
+simplifyTypeRef _ other = other
+
 lintImportDecl
   :: forall m
    . MonadWriter MultipleErrors m
@@ -214,15 +242,7 @@ lintImportDecl env mni qualifierName names ss declType allowImplicit =
   checkImplicit warning =
     if null allRefs
     then unused
-    else warn (warning mni (map simplifyTypeRef allRefs))
-    where
-    -- Replace explicit type refs with data constructor lists from listing the
-    -- used constructors explicity `T(X, Y, [...])` to `T(..)` for suggestion
-    -- message.
-    simplifyTypeRef :: DeclarationRef -> DeclarationRef
-    simplifyTypeRef (TypeRef ss' name (Just dctors))
-      | not (null dctors) = TypeRef ss' name Nothing
-    simplifyTypeRef other = other
+    else warn (warning mni (map (simplifyTypeRef $ const True) allRefs))
 
   checkExplicit
     :: [DeclarationRef]
@@ -236,20 +256,27 @@ lintImportDecl env mni qualifierName names ss declType allowImplicit =
     didWarn <- case (length diff, length idents) of
       (0, _) -> return False
       (n, m) | n == m -> unused
-      _ -> warn (UnusedExplicitImport mni diff qualifierName allRefs)
+      _ -> warn (UnusedExplicitImport mni diff qualifierName $ map simplifyTypeRef' allRefs)
 
     didWarn' <- forM (mapMaybe getTypeRef declrefs) $ \(tn, c) -> do
       let allCtors = dctorsForType mni tn
       -- If we've not already warned a type is unused, check its data constructors
       unless' (TyName tn `notElem` usedNames) $
         case (c, dctors `intersect` allCtors) of
-          (_, []) | c /= Just [] -> warn (UnusedDctorImport mni tn qualifierName allRefs)
+          (_, []) | c /= Just [] -> warn (UnusedDctorImport mni tn qualifierName $ map simplifyTypeRef' allRefs)
           (Just ctors, dctors') ->
             let ddiff = ctors \\ dctors'
-            in unless' (null ddiff) . warn $ UnusedDctorExplicitImport mni tn ddiff qualifierName allRefs
+            in unless' (null ddiff) . warn $ UnusedDctorExplicitImport mni tn ddiff qualifierName $ map simplifyTypeRef' allRefs
           _ -> return False
 
     return (didWarn || or didWarn')
+
+    where
+      simplifyTypeRef' :: DeclarationRef -> DeclarationRef
+      simplifyTypeRef' = simplifyTypeRef (\name -> any (isMatch name) declrefs)
+        where
+          isMatch name (TypeRef _ name' Nothing) = name == name'
+          isMatch _ _ = False
 
   unused :: m Bool
   unused = warn (UnusedImport mni)
@@ -301,13 +328,14 @@ findUsedRefs ss env mni qn names =
     valueOpRefs = ValueOpRef ss <$> mapMaybe (getValOpName <=< disqualifyFor qn) names
     typeOpRefs = TypeOpRef ss <$> mapMaybe (getTypeOpName <=< disqualifyFor qn) names
     types = mapMaybe (getTypeName <=< disqualifyFor qn) names
+    kindRefs = KindRef ss <$> mapMaybe (getKindName <=< disqualifyFor qn) names
     dctors = mapMaybe (getDctorName <=< disqualifyFor qn) names
     typesWithDctors = reconstructTypeRefs dctors
     typesWithoutDctors = filter (`M.notMember` typesWithDctors) types
     typesRefs
       = map (flip (TypeRef ss) (Just [])) typesWithoutDctors
       ++ map (\(ty, ds) -> TypeRef ss ty (Just ds)) (M.toList typesWithDctors)
-  in sortBy compDecRef $ classRefs ++ typeOpRefs ++ typesRefs ++ valueRefs ++ valueOpRefs
+  in sortBy compDecRef $ classRefs ++ typeOpRefs ++ typesRefs ++ kindRefs ++ valueRefs ++ valueOpRefs
 
   where
 

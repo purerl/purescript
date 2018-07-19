@@ -1,10 +1,24 @@
 # Protocol
 
-Encode the following JSON formats into a single line string and pass them to
-`psc-ide-client`s stdin. You can then read the result from `psc-ide-client`s
-stdout as a single line. The result needs to be unwrapped from the "wrapper"
-which separates success from failure. This wrapper is described at the end of
-this document.
+Communication with `purs ide server` is via a JSON protocol over a TCP connection:
+the server listens on a particular (configurable) port, and will accept a single line
+of JSON input in the format described below, terminated by a newline, before giving 
+a JSON response and closing the connection.
+
+The `purs ide client` command can be used as a wrapper for the TCP connection, but
+otherwise behaves the same, accepting a line of JSON on stdin and exiting after
+giving a result on stdout.
+
+The result needs to be unwrapped from the "wrapper" which separates success
+from failure:
+
+```json
+{
+  "resultType": "success|error",
+  "result": Result|Error
+}
+```
+
 
 ## Command:
 ### Load
@@ -66,7 +80,8 @@ The `complete` command looks up possible completions/corrections.
   If no matcher is given every candidate, that passes the filters, is returned
   in no particular order.
 
- - `currentModule :: (optional) String`: The current modules name. If it matches
+ - `currentModule :: (optional) String`: The current modules name. Allows you 
+   to see module-private functions after a successful rebuild. If it matches
    with the rebuild cache non-exported modules will also be completed. You can
    fill the rebuild cache by using the "Rebuild" command.
 
@@ -173,6 +188,40 @@ The following format is returned as the Result:
 ```
 You should then be able to replace the affected line of code in the editor with the new suggestions.
 
+### Usages
+
+The Usages command accepts a triplet of modulename, namespace, and identifier,
+which uniquely identify a declaration and returns all usages of that identifier
+in all loaded files. Note that we use the parsed source files, so you need to
+pass source globs at startup to use this command.
+
+```json
+{
+ "command": "usages",
+ "params": {
+  "module": "Data.Array",
+  "namespace": "value|type|kind",
+  "identifier": "filter"
+ }
+}
+```
+
+**Result:**
+
+The following format is returned as the Result:
+
+```json
+[ { "name": "/path/to/file"
+  , "start": [1, 3]
+  , "end": [3, 1]
+  }
+, { "name": "/path/to/file"
+  , "start": [5, 6]
+  , "end": [5, 8]
+  }
+]
+```
+
 ### Import
 
 For now all of the import related commands work with a file on the filesystem.
@@ -218,7 +267,7 @@ Example:
 This command just adds an unqualified import for the given modulename.
 
 Arguments:
-- `moduleName :: String`
+- `module :: String`
 
 Example:
 ```json
@@ -239,7 +288,8 @@ Example:
 This command adds an import for the given modulename and qualifier.
 
 Arguments:
-- `moduleName :: String`
+- `module :: String`
+- `qualifier :: String`
 
 Example:
 ```json
@@ -264,13 +314,14 @@ match it adds the import and returns. If it finds more than one match it
 responds with a list of the found matches as completions like the complete
 command.
 
-You can also supply a list of filters like the ones for completion. This way you
-can narrow down the search to a certain module and resolve the case in which
+You can also supply a list of filters like the ones for completion. These are
+specified as part of the top level command rather than within the `importCommand`.
+This way you can narrow down the search to a certain module and resolve the case in which
 more then one match was found.
 
 Arguments:
-- `moduleName :: String`
-- `filters :: [Filter]`
+- `identifier :: String`
+- `qualifier :: String` (optional)
 
 Example:
 ```json
@@ -287,6 +338,28 @@ Example:
 }
 ```
 
+Example with qualifier and filter:
+```json
+{
+  "command": "import",
+  "params": {
+    "file": "/home/creek/Documents/chromacannon/src/Demo.purs",
+    "outfile": "/home/creek/Documents/chromacannon/src/Demo.purs",
+    "importCommand": {
+      "importCommand": "addImport",
+      "identifier": "length",
+      "qualifier": "Array"
+    },
+    "filters": [{
+      "filter": "modules",
+      "params": {
+        "modules": ["Data.Array"]
+      }
+    }]
+  }
+}
+```
+
 ### Rebuild
 
 The `rebuild` command provides a fast rebuild for a single module. It doesn't
@@ -296,12 +369,16 @@ identifiers.
 
 Arguments:
   - `file :: String` the path to the module to rebuild
+  - `actualFile :: Maybe String` Specifies the path to be used for location
+    information and parse errors. This is useful in case a temp file is used as
+    the source for a rebuild.
 
 ```json
 {
   "command": "rebuild",
   "params": {
     "file": "/path/to/file.purs"
+    "actualFile": "/path/to/actualFile.purs"
   }
 }
 ```
@@ -311,52 +388,6 @@ Arguments:
 In the Success case you get a list of warnings in the compilers json format.
 
 In the Error case you get the errors in the compilers json format
-
-### Pursuit
-The `pursuit` command looks up the packages/completions for a given identifier from Pursuit.
-
-**Params:**
- - `query :: String`: With `type: "package"` this should be a module name. With
-   `type: "completion"` this can be any string to look up.
- - `type :: String`: Takes the following values:
-   - `package`: Looks for packages that contain the given module name.
-   - `completion` Looks for declarations for the query from Pursuit.
-
-```json
-{
-  "command": "pursuit",
-  "params": {
-    "query": "Data.Array",
-    "type": "package"
-  }
-}
-```
-
-**Result:**
-
-`package` returns:
-
-```json
-[
-  {
-  "module": "Module1.Name",
-  "package": "purescript-packagename"
-  }
-]
-```
-
-`completion` returns:
-
-```json
-[
-  {
-  "module": "Data.Array",
-  "identifier": "filter",
-  "type": "forall a. (a -> Boolean) -> Array a -> Array a",
-  "package": "purescript-arrays"
-  }
-]
-```
 
 ### List
 
@@ -630,17 +661,6 @@ the edit distance in between the search and the loaded identifiers.
     "search": "dilterM",
     "maximumDistance": 3
   }
-}
-```
-
-## Responses
-
-All Responses are wrapped in the following format:
-
-```json
-{
-  "resultType": "success|error",
-  "result": Result|Error
 }
 ```
 

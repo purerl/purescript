@@ -22,6 +22,7 @@ import           Data.List (transpose, nubBy, sort, partition, dropWhileEnd)
 import qualified Data.List.NonEmpty as NEL
 import           Data.Maybe (maybeToList, fromMaybe, mapMaybe)
 import qualified Data.Map as M
+import qualified Data.Set as S
 import qualified Data.Text as T
 import           Data.Text (Text)
 import           Language.PureScript.AST
@@ -46,7 +47,7 @@ import qualified Text.PrettyPrint.Boxes as Box
 newtype ErrorSuggestion = ErrorSuggestion Text
 
 -- | Get the source span for an error
-errorSpan :: ErrorMessage -> Maybe SourceSpan
+errorSpan :: ErrorMessage -> Maybe (NEL.NonEmpty SourceSpan)
 errorSpan = findHint matchSpan
   where
   matchSpan (PositionedError ss) = Just ss
@@ -77,7 +78,6 @@ errorCode em = case unwrapErrorMessage em of
   ErrorParsingFFIModule{} -> "ErrorParsingFFIModule"
   ErrorParsingModule{} -> "ErrorParsingModule"
   MissingFFIModule{} -> "MissingFFIModule"
-  MultipleFFIModules{} -> "MultipleFFIModules"
   UnnecessaryFFIModule{} -> "UnnecessaryFFIModule"
   MissingFFIImplementations{} -> "MissingFFIImplementations"
   UnusedFFIImplementations{} -> "UnusedFFIImplementations"
@@ -103,6 +103,8 @@ errorCode em = case unwrapErrorMessage em of
   DeclConflict{} -> "DeclConflict"
   ExportConflict{} -> "ExportConflict"
   DuplicateModule{} -> "DuplicateModule"
+  DuplicateTypeClass{} -> "DuplicateTypeClass"
+  DuplicateInstance{} -> "DuplicateInstance"
   DuplicateTypeArgument{} -> "DuplicateTypeArgument"
   InvalidDoBind -> "InvalidDoBind"
   InvalidDoLet -> "InvalidDoLet"
@@ -165,6 +167,7 @@ errorCode em = case unwrapErrorMessage em of
   DuplicateExportRef{} -> "DuplicateExportRef"
   IntOutOfRange{} -> "IntOutOfRange"
   ImplicitQualifiedImport{} -> "ImplicitQualifiedImport"
+  ImplicitQualifiedImportReExport{} -> "ImplicitQualifiedImportReExport"
   ImplicitImport{} -> "ImplicitImport"
   HidingImport{} -> "HidingImport"
   CaseBinderLengthDiffers{} -> "CaseBinderLengthDiffers"
@@ -177,6 +180,9 @@ errorCode em = case unwrapErrorMessage em of
   ClassInstanceArityMismatch{} -> "ClassInstanceArityMismatch"
   UserDefinedWarning{} -> "UserDefinedWarning"
   UnusableDeclaration{} -> "UnusableDeclaration"
+  CannotDefinePrimModules{} -> "CannotDefinePrimModules"
+  MixedAssociativityError{} -> "MixedAssociativityError"
+  NonAssociativeError{} -> "NonAssociativeError"
 
 -- | A stack trace for an error
 newtype MultipleErrors = MultipleErrors
@@ -193,7 +199,11 @@ errorMessage err = MultipleErrors [ErrorMessage [] err]
 
 -- | Create an error set from a single simple error message and source annotation
 errorMessage' :: SourceSpan -> SimpleErrorMessage -> MultipleErrors
-errorMessage' ss err = MultipleErrors [ErrorMessage [PositionedError ss] err]
+errorMessage' ss err = MultipleErrors [ErrorMessage [positionedError ss] err]
+
+-- | Create an error set from a single simple error message and source annotations
+errorMessage'' :: NEL.NonEmpty SourceSpan -> SimpleErrorMessage -> MultipleErrors
+errorMessage'' sss err = MultipleErrors [ErrorMessage [PositionedError sss] err]
 
 -- | Create an error set from a single error message
 singleError :: ErrorMessage -> MultipleErrors
@@ -275,7 +285,7 @@ onTypesInErrorMessageM f (ErrorMessage hints simple) = ErrorMessage <$> traverse
   gSimple (InvalidDerivedInstance cl ts n) = InvalidDerivedInstance cl <$> traverse f ts <*> pure n
   gSimple (ExpectedTypeConstructor cl ts ty) = ExpectedTypeConstructor cl <$> traverse f ts <*> f ty
   gSimple (ExpectedType ty k) = ExpectedType <$> f ty <*> pure k
-  gSimple (OrphanInstance nm cl ts) = OrphanInstance nm cl <$> traverse f ts
+  gSimple (OrphanInstance nm cl noms ts) = OrphanInstance nm cl noms <$> traverse f ts
   gSimple (WildcardInferredType ty ctx) = WildcardInferredType <$> f ty <*> traverse (sndM f) ctx
   gSimple (HoleInferredType name ty ctx env) = HoleInferredType name <$> f ty <*> traverse (sndM f) ctx  <*> onTypeSearchTypesM f env
   gSimple (MissingTypeDeclaration nm ty) = MissingTypeDeclaration nm <$> f ty
@@ -307,6 +317,7 @@ errorSuggestion err =
       UnusedDctorExplicitImport mn _ _ qual refs -> suggest $ importSuggestion mn refs qual
       ImplicitImport mn refs -> suggest $ importSuggestion mn refs Nothing
       ImplicitQualifiedImport mn asModule refs -> suggest $ importSuggestion mn refs (Just asModule)
+      ImplicitQualifiedImportReExport mn asModule refs -> suggest $ importSuggestion mn refs (Just asModule)
       HidingImport mn refs -> suggest $ importSuggestion mn refs Nothing
       MissingTypeDeclaration ident ty -> suggest $ showIdent ident <> " :: " <> T.pack (prettyPrintSuggestedType ty)
       WildcardInferredType ty _ -> suggest $ T.pack (prettyPrintSuggestedType ty)
@@ -325,7 +336,10 @@ errorSuggestion err =
 
 suggestionSpan :: ErrorMessage -> Maybe SourceSpan
 suggestionSpan e =
-  getSpan (unwrapErrorMessage e) <$> errorSpan e
+  -- The `NEL.head` is a bit arbitrary here, but I don't think we'll
+  -- have errors-with-suggestions that also have multiple source
+  -- spans. -garyb
+  getSpan (unwrapErrorMessage e) . NEL.head <$> errorSpan e
   where
     startOnly SourceSpan{spanName, spanStart} = SourceSpan {spanName, spanStart, spanEnd = spanStart}
 
@@ -432,7 +446,7 @@ prettyPrintSingleError (PPEOptions codeColor full level showDocs relPath) e = fl
     renderSimpleErrorMessage :: SimpleErrorMessage -> Box.Box
     renderSimpleErrorMessage (ModuleNotFound mn) =
       paras [ line $ "Module " <> markCode (runModuleName mn) <> " was not found."
-            , line "Make sure the source file exists, and that it has been provided as an input to psc."
+            , line "Make sure the source file exists, and that it has been provided as an input to the compiler."
             ]
     renderSimpleErrorMessage (CannotGetFileInfo path) =
       paras [ line "Unable to read file info: "
@@ -485,10 +499,6 @@ prettyPrintSingleError (PPEOptions codeColor full level showDocs relPath) e = fl
                 ]
             ]
 
-    renderSimpleErrorMessage (MultipleFFIModules mn paths) =
-      paras [ line $ "Multiple foreign module implementations have been provided for module " <> markCode (runModuleName mn) <> ": "
-            , indent . paras $ map lineS paths
-            ]
     renderSimpleErrorMessage InvalidDoBind =
       line "The last statement in a 'do' block must be an expression, but this block ends with a binder."
     renderSimpleErrorMessage InvalidDoLet =
@@ -540,9 +550,15 @@ prettyPrintSingleError (PPEOptions codeColor full level showDocs relPath) e = fl
       line $ "Declaration for " <> printName (Qualified Nothing new) <> " conflicts with an existing " <> nameType existing <> " of the same name."
     renderSimpleErrorMessage (ExportConflict new existing) =
       line $ "Export for " <> printName new <> " conflicts with " <> runName existing
-    renderSimpleErrorMessage (DuplicateModule mn ss) =
-      paras [ line ("Module " <> markCode (runModuleName mn) <> " has been defined multiple times:")
-            , indent . paras $ map (line . displaySourceSpan relPath) ss
+    renderSimpleErrorMessage (DuplicateModule mn) =
+      line $ "Module " <> markCode (runModuleName mn) <> " has been defined multiple times"
+    renderSimpleErrorMessage (DuplicateTypeClass pn ss) =
+      paras [ line ("Type class " <> markCode (runProperName pn) <> " has been defined multiple times:")
+            , indent $ line $ displaySourceSpan relPath ss
+            ]
+    renderSimpleErrorMessage (DuplicateInstance pn ss) =
+      paras [ line ("Instance " <> markCode (showIdent pn) <> " has been defined multiple times:")
+            , indent $ line $ displaySourceSpan relPath ss
             ]
     renderSimpleErrorMessage (CycleInDeclaration nm) =
       line $ "The value of " <> markCode (showIdent nm) <> " is undefined here, so this reference is not allowed."
@@ -608,18 +624,16 @@ prettyPrintSingleError (PPEOptions codeColor full level showDocs relPath) e = fl
             , line "with type"
             , markCodeBox $ indent $ typeAsBox t2
             ]
-    renderSimpleErrorMessage (OverlappingInstances nm ts (d : ds)) =
+    renderSimpleErrorMessage (OverlappingInstances _ _ []) = internalError "OverlappingInstances: empty instance list"
+    renderSimpleErrorMessage (OverlappingInstances nm ts ds) =
       paras [ line "Overlapping type class instances found for"
             , markCodeBox $ indent $ Box.hsep 1 Box.left
                 [ line (showQualified runProperName nm)
                 , Box.vcat Box.left (map typeAtomAsBox ts)
                 ]
             , line "The following instances were found:"
-            , indent $ paras (line (showQualified showIdent d <> " (chosen)") : map (line . showQualified showIdent) ds)
-            , line "Overlapping type class instances can lead to different behavior based on the order of module imports, and for that reason are not recommended."
-            , line "They may be disallowed completely in a future version of the compiler."
+            , indent $ paras (map (line . showQualified showIdent) ds)
             ]
-    renderSimpleErrorMessage OverlappingInstances{} = internalError "OverlappingInstances: empty instance list"
     renderSimpleErrorMessage (UnknownClass nm) =
       paras [ line "No type class instance was found for class"
             , markCodeBox $ indent $ line (showQualified runProperName nm)
@@ -760,8 +774,10 @@ prettyPrintSingleError (PPEOptions codeColor full level showDocs relPath) e = fl
             , indent $ line $ markCode $ prettyPrintKind kind
             , line "instead."
             ]
-    renderSimpleErrorMessage (IncorrectConstructorArity nm) =
-      line $ "Data constructor " <> markCode (showQualified runProperName nm) <> " was given the wrong number of arguments in a case expression."
+    renderSimpleErrorMessage (IncorrectConstructorArity nm expected actual) =
+      paras [ line $ "Data constructor " <> markCode (showQualified runProperName nm) <> " was given " <> T.pack (show actual) <> " arguments in a case expression, but expected " <> T.pack (show expected) <> " arguments."
+            , line $ "This problem can be fixed by giving " <> markCode (showQualified runProperName nm) <> " " <> T.pack (show expected) <> " arguments."
+            ]
     renderSimpleErrorMessage (ExprDoesNotHaveType expr ty) =
       paras [ line "Expression"
             , markCodeBox $ indent $ prettyPrintValue valueDepth expr
@@ -774,16 +790,24 @@ prettyPrintSingleError (PPEOptions codeColor full level showDocs relPath) e = fl
       line $ "Type of expression contains additional label " <> markCode (prettyPrintLabel prop) <> "."
     renderSimpleErrorMessage TypeSynonymInstance =
       line "Type class instances for type synonyms are disallowed."
-    renderSimpleErrorMessage (OrphanInstance nm cnm ts) =
-      paras [ line $ "Type class instance " <> markCode (showIdent nm) <> " for "
+    renderSimpleErrorMessage (OrphanInstance nm cnm nonOrphanModules ts) =
+      paras [ line $ "Orphan instance " <> markCode (showIdent nm) <> " found for "
             , markCodeBox $ indent $ Box.hsep 1 Box.left
                 [ line (showQualified runProperName cnm)
                 , Box.vcat Box.left (map typeAtomAsBox ts)
                 ]
-            , line "is an orphan instance."
-            , line "An orphan instance is one which is defined in a module that is unrelated to either the class or the collection of data types that the instance is defined for."
-            , line "Consider moving the instance, if possible, or using a newtype wrapper."
-            ]
+            , Box.vcat Box.left $ case modulesToList of
+                [] -> [ line "There is nowhere this instance can be placed without being an orphan."
+                      , line "A newtype wrapper can be used to avoid this problem."
+                      ]
+                _  -> [ Box.text $ "This problem can be resolved by declaring the instance in "
+                          <> T.unpack formattedModules
+                          <> ", or by defining the instance on a newtype wrapper."
+                      ]
+                ]
+      where
+        modulesToList = S.toList $ S.delete (moduleNameFromString "Prim") nonOrphanModules
+        formattedModules = T.intercalate " or " ((markCode . runModuleName) <$> modulesToList)
     renderSimpleErrorMessage (InvalidNewtype name) =
       paras [ line $ "Newtype " <> markCode (runProperName name) <> " is invalid."
             , line "Newtypes must define a single constructor with a single argument."
@@ -900,6 +924,11 @@ prettyPrintSingleError (PPEOptions codeColor full level showDocs relPath) e = fl
             , line $ "As there are multiple modules being imported as " <> markCode (runModuleName asModule) <> ", consider using the explicit form:"
             , indent $ line $ markCode $ showSuggestion msg
             ]
+    renderSimpleErrorMessage msg@(ImplicitQualifiedImportReExport importedModule asModule _) =
+      paras [ line $ "Module " <> markCode (runModuleName importedModule) <> " was imported as " <> markCode (runModuleName asModule) <> " with unspecified imports."
+            , line $ "As this module is being re-exported, consider using the explicit form:"
+            , indent $ line $ markCode $ showSuggestion msg
+            ]
 
     renderSimpleErrorMessage msg@(ImplicitImport mn _) =
       paras [ line $ "Module " <> markCode (runModuleName mn) <> " has unspecified imports, consider using the explicit form: "
@@ -959,9 +988,47 @@ prettyPrintSingleError (PPEOptions codeColor full level showDocs relPath) e = fl
             , indent msg
             ]
 
-    renderSimpleErrorMessage (UnusableDeclaration ident) =
-      paras [ line $ "The declaration " <> markCode (showIdent ident) <> " is unusable."
-            , line $ "This happens when a constraint couldn't possibly have enough information to work out which instance is required."
+    renderSimpleErrorMessage (UnusableDeclaration ident unexplained) =
+      paras $
+        [ line $ "The declaration " <> markCode (showIdent ident) <> " contains arguments that couldn't be determined."
+        ] <>
+
+        case unexplained of
+          [required] ->
+            [ line $ "These arguments are: { " <> T.intercalate ", " required <> " }"
+            ]
+
+          options  ->
+            [ line "To fix this, one of the following sets of variables must be determined:"
+            , Box.moveRight 2 . Box.vsep 0 Box.top $
+                map (\set -> line $ "{ " <> T.intercalate ", " set <> " }") options
+            ]
+
+    renderSimpleErrorMessage (CannotDefinePrimModules mn) =
+      paras $
+        [ line $ "The module name " <> markCode (runModuleName mn) <> " is in the Prim namespace."
+        , line $ "The Prim namespace is reserved for compiler-defined terms."
+        ]
+
+    renderSimpleErrorMessage (MixedAssociativityError opsWithAssoc) =
+      paras
+        [ line "Cannot parse an expression that uses operators of the same precedence but mixed associativity:"
+        , indent $ paras $ map (\(name, assoc) -> line $ markCode (showQualified showOp name) <> " is " <> markCode (T.pack (showAssoc assoc))) (NEL.toList opsWithAssoc)
+        , line "Use parentheses to resolve this ambiguity."
+        ]
+
+    renderSimpleErrorMessage (NonAssociativeError ops) =
+      if NEL.length ops == 1
+        then
+          paras
+            [ line $ "Cannot parse an expression that uses multiple instances of the non-associative operator " <> markCode (showQualified showOp (NEL.head ops)) <> "."
+            , line "Use parentheses to resolve this ambiguity."
+            ]
+        else
+          paras
+            [ line "Cannot parse an expression that uses multiple non-associative operators of the same precedence:"
+            , indent $ paras $ map (line . markCode . showQualified showOp) (NEL.toList ops)
+            , line "Use parentheses to resolve this ambiguity."
             ]
 
     renderHint :: ErrorMessageHint -> Box.Box -> Box.Box
@@ -1089,7 +1156,7 @@ prettyPrintSingleError (PPEOptions codeColor full level showDocs relPath) e = fl
                 ]
             ]
     renderHint (PositionedError srcSpan) detail =
-      paras [ line $ "at " <> displaySourceSpan relPath srcSpan
+      paras [ line $ "at " <> displaySourceSpan relPath (NEL.head srcSpan)
             , detail
             ]
 
@@ -1344,10 +1411,15 @@ toTypelevelString :: Type -> Maybe Box.Box
 toTypelevelString (TypeLevelString s) =
   Just . Box.text $ decodeStringWithReplacement s
 toTypelevelString (TypeApp (TypeConstructor f) x)
-  | f == primName "TypeString" = Just (typeAsBox x)
+  | f == primSubName C.typeError "Text" = toTypelevelString x
+toTypelevelString (TypeApp (TypeConstructor f) x)
+  | f == primSubName C.typeError "Quote" = Just (typeAsBox x)
 toTypelevelString (TypeApp (TypeApp (TypeConstructor f) x) ret)
-  | f == primName "TypeConcat" =
+  | f == primSubName C.typeError "Beside" =
     (Box.<>) <$> toTypelevelString x <*> toTypelevelString ret
+toTypelevelString (TypeApp (TypeApp (TypeConstructor f) x) ret)
+  | f == primSubName C.typeError "Above" =
+    (Box.//) <$> toTypelevelString x <*> toTypelevelString ret
 toTypelevelString _ = Nothing
 
 -- | Rethrow an error with a more detailed error message in the case of failure
@@ -1374,7 +1446,10 @@ warnAndRethrowWithPosition :: (MonadError MultipleErrors m, MonadWriter Multiple
 warnAndRethrowWithPosition pos = rethrowWithPosition pos . warnWithPosition pos
 
 withPosition :: SourceSpan -> ErrorMessage -> ErrorMessage
-withPosition pos (ErrorMessage hints se) = ErrorMessage (PositionedError pos : hints) se
+withPosition pos (ErrorMessage hints se) = ErrorMessage (positionedError pos : hints) se
+
+positionedError :: SourceSpan -> ErrorMessageHint
+positionedError = PositionedError . pure
 
 -- | Runs a computation listening for warnings and then escalating any warnings
 -- that match the predicate to error status.

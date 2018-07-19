@@ -1,59 +1,62 @@
 module Language.PureScript.CodeGen.Erl.Constants where
 
-import Data.Text (Text)
+import Data.String (IsString)
 
 -- Modules
 
-prim :: Text
-prim = "prim"
+prim :: forall a. (IsString a) => a
+prim = "prim@ps@ps"
 
-prelude :: Text
-prelude = "prelude"
+prelude :: forall a. (IsString a) => a
+prelude = "prelude@ps"
 
-dataArray :: Text
-dataArray = "data_array"
+dataArray :: forall a. (IsString a) => a
+dataArray = "data_array@ps"
 
-eff :: Text
-eff = "control_monad_eff"
+eff :: forall a. (IsString a) => a
+eff = "control_monad_eff@ps"
 
-controlApplicative :: Text
-controlApplicative = "control_applicative"
+effect :: forall a. (IsString a) => a
+effect = "effect@ps"
 
-controlSemigroupoid :: Text
-controlSemigroupoid = "control_semigroupoid"
+controlApplicative :: forall a. (IsString a) => a
+controlApplicative = "control_applicative@ps"
 
-controlBind :: Text
-controlBind = "control_bind"
+controlSemigroupoid :: forall a. (IsString a) => a
+controlSemigroupoid = "control_semigroupoid@ps"
 
-dataBounded :: Text
-dataBounded = "data_bounded"
+controlBind :: forall a. (IsString a) => a
+controlBind = "control_bind@ps"
 
-dataSemigroup :: Text
-dataSemigroup = "data_semigroup"
+dataBounded :: forall a. (IsString a) => a
+dataBounded = "data_bounded@ps"
 
-dataHeytingAlgebra :: Text
-dataHeytingAlgebra = "data_heytingAlgebra"
+dataSemigroup :: forall a. (IsString a) => a
+dataSemigroup = "data_semigroup@ps"
 
-dataEq :: Text
-dataEq = "data_eq"
+dataHeytingAlgebra :: forall a. (IsString a) => a
+dataHeytingAlgebra = "data_heytingAlgebra@ps"
 
-dataOrd :: Text
-dataOrd = "data_ord"
+dataEq :: forall a. (IsString a) => a
+dataEq = "data_eq@ps"
 
-dataSemiring :: Text
-dataSemiring = "data_semiring"
+dataOrd :: forall a. (IsString a) => a
+dataOrd = "data_ord@ps"
 
-dataRing :: Text
-dataRing = "data_ring"
+dataSemiring :: forall a. (IsString a) => a
+dataSemiring = "data_semiring@ps"
 
-dataEuclideanRing :: Text
-dataEuclideanRing = "data_euclideanRing"
+dataRing :: forall a. (IsString a) => a
+dataRing = "data_ring@ps"
 
-dataFunction :: Text
-dataFunction = "data_function"
+dataEuclideanRing :: forall a. (IsString a) => a
+dataEuclideanRing = "data_euclideanRing@ps"
 
-dataFunctionUncurried :: Text
-dataFunctionUncurried = "data_function_uncurried"
+dataFunction :: forall a. (IsString a) => a
+dataFunction = "data_function@ps"
 
-dataIntBits :: Text
-dataIntBits = "data_int_bits"
+dataFunctionUncurried :: forall a. (IsString a) => a
+dataFunctionUncurried = "data_function_uncurried@ps"
+
+dataIntBits :: forall a. (IsString a) => a
+dataIntBits = "data_int_bits@ps"

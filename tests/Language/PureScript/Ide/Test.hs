@@ -20,10 +20,12 @@ import qualified Language.PureScript             as P
 
 defConfig :: IdeConfiguration
 defConfig =
-  IdeConfiguration { confLogLevel = LogNone
-                , confOutputPath = "output/"
-                , confGlobs = ["src/*.purs"]
-                }
+  IdeConfiguration
+    { confLogLevel = LogNone
+    , confOutputPath = "output/"
+    , confGlobs = ["src/**/*.purs"]
+    , confEditorMode = False
+    }
 
 runIde' :: IdeConfiguration -> IdeState -> [Command] -> IO ([Either IdeError Success], IdeState)
 runIde' conf s cs = do
@@ -113,10 +115,16 @@ ss x y = P.SourceSpan "Test.purs" (P.SourcePos x y) (P.SourcePos x y)
 mn :: Text -> P.ModuleName
 mn = P.moduleNameFromString
 
+projectDir :: FilePath
+projectDir = "." </> "tests" </> "support" </> "pscide"
+
+getProjectDirectory :: IO FilePath
+getProjectDirectory = makeAbsolute projectDir
+
 inProject :: IO a -> IO a
 inProject f = do
   cwd' <- getCurrentDirectory
-  setCurrentDirectory ("." </> "tests" </> "support" </> "pscide")
+  setCurrentDirectory projectDir
   a <- f
   setCurrentDirectory cwd'
   pure a

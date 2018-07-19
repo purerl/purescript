@@ -7,6 +7,7 @@ module Language.PureScript.Sugar.Names.Env
   , nullExports
   , Env
   , primEnv
+  , primExports
   , envModuleSourceSpan
   , envModuleImports
   , envModuleExports
@@ -34,6 +35,7 @@ import Data.Maybe (fromJust, mapMaybe)
 import qualified Data.Map as M
 import qualified Data.Set as S
 
+import qualified Language.PureScript.Constants as C
 import Language.PureScript.AST
 import Language.PureScript.Environment
 import Language.PureScript.Errors
@@ -48,6 +50,7 @@ data ImportRecord a =
   ImportRecord
     { importName :: Qualified a
     , importSourceModule :: ModuleName
+    , importSourceSpan :: SourceSpan
     , importProvenance :: ImportProvenance
     }
     deriving (Eq, Ord, Show)
@@ -182,22 +185,79 @@ envModuleExports (_, _, exps) = exps
 -- The exported types from the @Prim@ module
 --
 primExports :: Exports
-primExports =
+primExports = mkPrimExports primTypes primClasses primKinds
+
+-- |
+-- The exported types from the @Prim.Ordering@ module
+--
+primOrderingExports :: Exports
+primOrderingExports = mkPrimExports primOrderingTypes mempty primOrderingKinds
+
+-- |
+-- The exported types from the @Prim.Row@ module
+--
+primRowExports :: Exports
+primRowExports = mkPrimExports primRowTypes primRowClasses mempty
+
+-- |
+-- The exported types from the @Prim.RowList@ module
+--
+primRowListExports :: Exports
+primRowListExports = mkPrimExports primRowListTypes primRowListClasses primRowListKinds
+
+-- |
+-- The exported types from the @Prim.Symbol@ module
+--
+primSymbolExports :: Exports
+primSymbolExports = mkPrimExports primSymbolTypes primSymbolClasses mempty
+
+-- |
+-- The exported types from the @Prim.TypeError@ module
+--
+primTypeErrorExports :: Exports
+primTypeErrorExports = mkPrimExports primTypeErrorTypes primTypeErrorClasses primTypeErrorKinds
+
+-- |
+-- Create a set of exports for a Prim module.
+--
+mkPrimExports
+  :: M.Map (Qualified (ProperName 'TypeName)) a
+  -> M.Map (Qualified (ProperName 'ClassName)) b
+  -> S.Set (Qualified (ProperName 'KindName))
+  -> Exports
+mkPrimExports ts cs ks =
   nullExports
-    { exportedTypes = M.fromList $ mkTypeEntry `map` M.keys primTypes
-    , exportedTypeClasses = M.fromList $ mkClassEntry `map` M.keys primClasses
-    , exportedKinds = M.fromList $ mkKindEntry `map` S.toList primKinds
+    { exportedTypes = M.fromList $ mkTypeEntry `map` M.keys ts
+    , exportedTypeClasses = M.fromList $ mkClassEntry `map` M.keys cs
+    , exportedKinds = M.fromList $ mkKindEntry `map` S.toList ks
     }
   where
   mkTypeEntry (Qualified mn name) = (name, ([], fromJust mn))
   mkClassEntry (Qualified mn name) = (name, fromJust mn)
   mkKindEntry (Qualified mn name) = (name, fromJust mn)
 
--- | Environment which only contains the Prim module.
+-- | Environment which only contains the Prim modules.
 primEnv :: Env
-primEnv = M.singleton
-  (ModuleName [ProperName "Prim"])
-  (internalModuleSourceSpan "<Prim>", nullImports, primExports)
+primEnv = M.fromList
+  [ ( C.Prim
+    , (internalModuleSourceSpan "<Prim>", nullImports, primExports)
+    )
+  , ( C.PrimOrdering
+    , (internalModuleSourceSpan "<Prim.Ordering>", nullImports, primOrderingExports)
+    )
+  , ( C.PrimRow
+    , (internalModuleSourceSpan "<Prim.Row>", nullImports, primRowExports)
+    )
+  , ( C.PrimRowList
+    , (internalModuleSourceSpan "<Prim.RowList>", nullImports, primRowListExports)
+    )
+  , ( C.PrimSymbol
+    , (internalModuleSourceSpan "<Prim.Symbol>", nullImports, primSymbolExports)
+    )
+  , ( C.PrimTypeError
+    , (internalModuleSourceSpan "<Prim.TypeError>", nullImports, primTypeErrorExports)
+    )
+  ]
 
 -- |
 -- When updating the `Exports` the behaviour is slightly different depending
@@ -214,13 +274,14 @@ data ExportMode = Internal | ReExport
 --
 exportType
   :: MonadError MultipleErrors m
-  => ExportMode
+  => SourceSpan
+  -> ExportMode
   -> Exports
   -> ProperName 'TypeName
   -> [ProperName 'ConstructorName]
   -> ModuleName
   -> m Exports
-exportType exportMode exps name dctors mn = do
+exportType ss exportMode exps name dctors mn = do
   let exTypes = exportedTypes exps
       exClasses = exportedTypeClasses exps
       dctorNameCounts :: [(ProperName 'ConstructorName, Int)]
@@ -242,11 +303,11 @@ exportType exportMode exps name dctors mn = do
     ReExport -> do
       forM_ (name `M.lookup` exTypes) $ \(_, mn') ->
         when (mn /= mn') $
-          throwExportConflict mn mn' (TyName name)
+          throwExportConflict ss mn mn' (TyName name)
       forM_ dctors $ \dctor ->
         forM_ ((elem dctor . fst) `find` exTypes) $ \(_, mn') ->
           when (mn /= mn') $
-            throwExportConflict mn mn' (DctorName dctor)
+            throwExportConflict ss mn mn' (DctorName dctor)
   return $ exps { exportedTypes = M.alter updateOrInsert name exTypes }
   where
   updateOrInsert Nothing = Just (dctors, mn)
@@ -258,12 +319,13 @@ exportType exportMode exps name dctors mn = do
 --
 exportTypeOp
   :: MonadError MultipleErrors m
-  => Exports
+  => SourceSpan
+  -> Exports
   -> OpName 'TypeOpName
   -> ModuleName
   -> m Exports
-exportTypeOp exps op mn = do
-  typeOps <- addExport TyOpName op mn (exportedTypeOps exps)
+exportTypeOp ss exps op mn = do
+  typeOps <- addExport ss TyOpName op mn (exportedTypeOps exps)
   return $ exps { exportedTypeOps = typeOps }
 
 -- |
@@ -271,19 +333,20 @@ exportTypeOp exps op mn = do
 --
 exportTypeClass
   :: MonadError MultipleErrors m
-  => ExportMode
+  => SourceSpan
+  -> ExportMode
   -> Exports
   -> ProperName 'ClassName
   -> ModuleName
   -> m Exports
-exportTypeClass exportMode exps name mn = do
+exportTypeClass ss exportMode exps name mn = do
   let exTypes = exportedTypes exps
   when (exportMode == Internal) $ do
     when (coerceProperName name `M.member` exTypes) $
       throwDeclConflict (TyClassName name) (TyName (coerceProperName name))
     when ((elem (coerceProperName name) . fst) `any` exTypes) $
       throwDeclConflict (TyClassName name) (DctorName (coerceProperName name))
-  classes <- addExport TyClassName name mn (exportedTypeClasses exps)
+  classes <- addExport ss TyClassName name mn (exportedTypeClasses exps)
   return $ exps { exportedTypeClasses = classes }
 
 -- |
@@ -291,12 +354,13 @@ exportTypeClass exportMode exps name mn = do
 --
 exportValue
   :: MonadError MultipleErrors m
-  => Exports
+  => SourceSpan
+  -> Exports
   -> Ident
   -> ModuleName
   -> m Exports
-exportValue exps name mn = do
-  values <- addExport IdentName name mn (exportedValues exps)
+exportValue ss exps name mn = do
+  values <- addExport ss IdentName name mn (exportedValues exps)
   return $ exps { exportedValues = values }
 
 -- |
@@ -305,12 +369,13 @@ exportValue exps name mn = do
 --
 exportValueOp
   :: MonadError MultipleErrors m
-  => Exports
+  => SourceSpan
+  -> Exports
   -> OpName 'ValueOpName
   -> ModuleName
   -> m Exports
-exportValueOp exps op mn = do
-  valueOps <- addExport ValOpName op mn (exportedValueOps exps)
+exportValueOp ss exps op mn = do
+  valueOps <- addExport ss ValOpName op mn (exportedValueOps exps)
   return $ exps { exportedValueOps = valueOps }
 
 -- |
@@ -318,12 +383,13 @@ exportValueOp exps op mn = do
 --
 exportKind
   :: MonadError MultipleErrors m
-  => Exports
+  => SourceSpan
+  -> Exports
   -> ProperName 'KindName
   -> ModuleName
   -> m Exports
-exportKind exps name mn = do
-  kinds <- addExport KiName name mn (exportedKinds exps)
+exportKind ss exps name mn = do
+  kinds <- addExport ss KiName name mn (exportedKinds exps)
   return $ exps { exportedKinds = kinds }
 
 -- |
@@ -332,16 +398,17 @@ exportKind exps name mn = do
 --
 addExport
   :: (MonadError MultipleErrors m, Ord a)
-  => (a -> Name)
+  => SourceSpan
+  -> (a -> Name)
   -> a
   -> ModuleName
   -> M.Map a ModuleName
   -> m (M.Map a ModuleName)
-addExport toName name mn exports =
+addExport ss toName name mn exports =
   case M.lookup name exports of
     Just mn'
       | mn == mn' -> return exports
-      | otherwise -> throwExportConflict mn mn' (toName name)
+      | otherwise -> throwExportConflict ss mn mn' (toName name)
     Nothing ->
       return $ M.insert name mn exports
 
@@ -361,12 +428,13 @@ throwDeclConflict new existing =
 --
 throwExportConflict
   :: MonadError MultipleErrors m
-  => ModuleName
+  => SourceSpan
+  -> ModuleName
   -> ModuleName
   -> Name
   -> m a
-throwExportConflict new existing name =
-  throwError . errorMessage $
+throwExportConflict ss new existing name =
+  throwError . errorMessage' ss $
     ExportConflict (Qualified (Just new) name) (Qualified (Just existing) name)
 
 -- |
@@ -386,11 +454,12 @@ getExports env mn =
 checkImportConflicts
   :: forall m a
    . (MonadError MultipleErrors m, MonadWriter MultipleErrors m)
-  => ModuleName
+  => SourceSpan
+  -> ModuleName
   -> (a -> Name)
   -> [ImportRecord a]
   -> m (ModuleName, ModuleName)
-checkImportConflicts currentModule toName xs =
+checkImportConflicts ss currentModule toName xs =
   let
     byOrig = sortBy (compare `on` importSourceModule) xs
     groups = groupBy ((==) `on` importSourceModule) byOrig
@@ -400,11 +469,11 @@ checkImportConflicts currentModule toName xs =
   in
     if length groups > 1
     then case nonImplicit of
-      [ImportRecord (Qualified (Just mnNew) _) mnOrig _] -> do
+      [ImportRecord (Qualified (Just mnNew) _) mnOrig ss' _] -> do
         let warningModule = if mnNew == currentModule then Nothing else Just mnNew
-        tell . errorMessage $ ScopeShadowing name warningModule $ delete mnNew conflictModules
+        tell . errorMessage' ss' $ ScopeShadowing name warningModule $ delete mnNew conflictModules
         return (mnNew, mnOrig)
-      _ -> throwError . errorMessage $ ScopeConflict name conflictModules
+      _ -> throwError . errorMessage' ss $ ScopeConflict name conflictModules
     else
-      let ImportRecord (Qualified (Just mnNew) _) mnOrig _ = head byOrig
+      let ImportRecord (Qualified (Just mnNew) _) mnOrig _ _ = head byOrig
       in return (mnNew, mnOrig)
