@@ -6,6 +6,7 @@ branches:
   # branches already get built after opening a pull request.
   only:
     - master
+    - erl
     - /^v\d+\.\d+(\.\d+)?(-\S*)?$/
 matrix:
   include:
