@@ -312,9 +312,11 @@ moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports foreignTypes
     guard bs (ge, e) = do
       var <- freshNameErl
       ge' <- valueToErl ge
-      let fun = EFunFull Nothing
-                  [(EFunBinder bs Nothing, ge'),
-                  (EFunBinder (replicate (length bs) (EVar "_")) Nothing, boolToAtom False)]
+      let binder = EFunBinder bs Nothing
+          fun = EFunFull Nothing
+                  ((binder, ge') :
+                  if irrefutable binder then []
+                  else [(EFunBinder (replicate (length bs) (EVar "_")) Nothing, boolToAtom False)])
           cas = EApp fun vals
       e' <- valueToErl e
       pure ([EVarBind var cas], (EFunBinder bs (Just $ Guard $ EVar var), e'))
@@ -327,8 +329,10 @@ moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports foreignTypes
     args' <- mapM (binderToErl' vals) es
 
     let cas binder = EApp (EFunFull Nothing
-                [(binder, EApp (EAtomLiteral $ Atom (Just "array") "to_list") [EVar x]),
-                (EFunBinder (replicate (length vals) (EVar "_")) Nothing, EAtomLiteral $ Atom Nothing "nil")]) vals
+                ((binder, EApp (EAtomLiteral $ Atom (Just "array") "to_list") [EVar x]) :
+                  if irrefutable binder then []
+                  else [(EFunBinder (replicate (length vals) (EVar "_")) Nothing, EAtomLiteral $ Atom Nothing "nil")]))
+                vals
     var <- freshNameErl
 
     let arr = EArrayLiteral (map fst args')
@@ -341,3 +345,8 @@ moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports foreignTypes
   binderToErl' vals (NamedBinder _ ident binder) = do
     (e, xs) <- binderToErl' vals binder
     pure (EVarBind (identToVar ident) e, xs)
+
+  irrefutable (EFunBinder bindEs Nothing) = all isVar bindEs
+    where isVar (EVar _) = True
+          isVar _ = False
+  irrefutable _ = False
