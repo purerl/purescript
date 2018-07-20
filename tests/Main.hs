@@ -22,6 +22,10 @@ import qualified TestUtils
 
 import System.IO (hSetEncoding, stdout, stderr, utf8)
 
+-- Disabling tests for purerl as calls out to node have not yet been replaced, for example
+disableErlTests :: Bool
+disableErlTests = True
+
 main :: IO ()
 main = do
   hSetEncoding stdout utf8
@@ -44,13 +48,14 @@ main = do
   defaultMain $
     testGroup
       "Tests"
+      (if disableErlTests then [ coreFnTests, docsTests, hierarchyTests ] else 
       [ compilerTests
       , psciTests
       , ideTests
       , coreFnTests
       , docsTests
       , hierarchyTests
-      ]
+      ])
 
   where
   heading msg = do

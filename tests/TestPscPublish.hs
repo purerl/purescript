@@ -21,8 +21,8 @@ import TestUtils
 
 main :: IO ()
 main = testPackage
-         "tests/support/bower_components/purescript-prelude"
-         "../../prelude-resolutions.json"
+         "tests/support/.psc-package/erl-0.12.0-20180719-2/prelude/v4.0.1-erl1"
+         "../../../../prelude-resolutions.json"
 
 data TestResult
   = ParseFailed String

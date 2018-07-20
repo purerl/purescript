@@ -29,7 +29,7 @@ etaConvert = everywhereOnErl convert
   where
     convert :: Erl -> Erl
     -- TODO ported from JS, but this seems to be beta-reduction and the iife below is eta...?
-    convert e'@(EApp (EFun _ x e) [arg])
+    convert (EApp (EFun _ x e) [arg])
       | shouldInline arg
       , arg /= EVar x
       , not (isRebound x e)
@@ -44,8 +44,7 @@ evaluateIifes :: Erl -> Erl
 evaluateIifes = everywhereOnErl convert
   where
   convert :: Erl -> Erl
-  -- TODO: check var does not occur in fun
-  convert e'@(EFun Nothing x (EApp fun@EFunFull{} [EVar x'])) | x == x', not (occurs x fun) = fun
+  convert (EFun Nothing x (EApp fun@EFunFull{} [EVar x'])) | x == x', not (occurs x fun) = fun
   convert e = e
 
 inlineCommonValues :: Erl -> Erl
@@ -199,17 +198,17 @@ ordString = (EC.dataOrd, C.ordString)
 ordChar :: forall a b. (IsString a, IsString b) => (a, b)
 ordChar = (EC.dataOrd, C.ordChar)
 
-semigroupString :: forall a b. (IsString a, IsString b) => (a, b)
-semigroupString = (EC.dataSemigroup, C.semigroupString)
+-- semigroupString :: forall a b. (IsString a, IsString b) => (a, b)
+-- semigroupString = (EC.dataSemigroup, C.semigroupString)
 
-boundedBoolean :: forall a b. (IsString a, IsString b) => (a, b)
-boundedBoolean = (EC.dataBounded, C.boundedBoolean)
+-- boundedBoolean :: forall a b. (IsString a, IsString b) => (a, b)
+-- boundedBoolean = (EC.dataBounded, C.boundedBoolean)
 
 heytingAlgebraBoolean :: forall a b. (IsString a, IsString b) => (a, b)
 heytingAlgebraBoolean = (EC.dataHeytingAlgebra, C.heytingAlgebraBoolean)
 
-semigroupoidFn :: forall a b. (IsString a, IsString b) => (a, b)
-semigroupoidFn = (EC.controlSemigroupoid, C.semigroupoidFn)
+-- semigroupoidFn :: forall a b. (IsString a, IsString b) => (a, b)
+-- semigroupoidFn = (EC.controlSemigroupoid, C.semigroupoidFn)
 
 opAdd :: forall a b. (IsString a, IsString b) => (a, b)
 opAdd = (EC.dataSemiring, C.add)
@@ -235,8 +234,8 @@ opGreaterThan = (EC.dataOrd, C.greaterThan)
 opGreaterThanOrEq :: forall a b. (IsString a, IsString b) => (a, b)
 opGreaterThanOrEq = (EC.dataOrd, C.greaterThanOrEq)
 
-opAppend :: forall a b. (IsString a, IsString b) => (a, b)
-opAppend = (EC.dataSemigroup, C.append)
+-- opAppend :: forall a b. (IsString a, IsString b) => (a, b)
+-- opAppend = (EC.dataSemigroup, C.append)
 
 opSub :: forall a b. (IsString a, IsString b) => (a, b)
 opSub = (EC.dataRing, C.sub)

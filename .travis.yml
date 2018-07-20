@@ -66,8 +66,16 @@ install:
     mkdir -p "$HOME/.local/bin"
     mv stack "$HOME/.local/bin/"
   fi
-- npm install -g bower # for psc-docs / psc-publish tests
 - export OS_NAME=$(./travis/convert-os-name.sh)
+- | # Install psc-package
+  if test ! -f "$HOME/.local/bin/psc-package"
+  then
+    URL="https://github.com/purescript/psc-package/releases/download/v0.4.0/${OS_NAME}.tar.gz"
+    echo "Downloading psc-package from $URL"
+    curl -L "$URL" | tar xzf - --strip-components 1 psc-package
+    mv psc-package "$HOME/.local/bin/"
+  fi
+- npm install -g bower # for psc-docs / psc-publish tests
 # Install 'timeout'
 - |
   if [ "$TRAVIS_OS_NAME" == "osx" ]

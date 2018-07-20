@@ -7,7 +7,6 @@ import qualified Data.Text as T
 import qualified Text.Parsec as P
 import Text.Parsec ( (<|>) )
 import qualified Text.Parsec.Char as PC
-import Control.Monad (void)
 
 parseFile :: P.SourceName -> Text -> Either P.ParseError [(Text, Int)]
 parseFile = P.parse parseLines
