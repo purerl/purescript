@@ -236,10 +236,6 @@ data BinaryOperator
   -- Bitwise right shift
   --
   | ShiftRight
-  -- -- |
-  -- -- Bitwise right shift with zero-fill
-  -- --
-  -- | ZeroFillShiftRight
   deriving (Show, Eq)
 
 everywhereOnErl :: (Erl -> Erl) -> Erl -> Erl
