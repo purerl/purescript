@@ -3,7 +3,6 @@ module Language.PureScript.CodeGen.Erl.Optimizer.Common where
 import Prelude.Compat
 import Data.Text (Text)
 
-import Data.Monoid ((<>))
 import Data.Maybe (fromMaybe)
 
 import Language.PureScript.PSString (PSString)

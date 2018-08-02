@@ -51,28 +51,21 @@ inlineCommonValues :: Erl -> Erl
 inlineCommonValues = everywhereOnErl convert
   where
   convert :: Erl -> Erl
-  convert = id
---   convert (JSApp ss fn [dict])
---     | isDict' [semiringNumber, semiringInt] dict && isFn fnZero fn = JSNumericLiteral ss (Left 0)
---     | isDict' [semiringNumber, semiringInt] dict && isFn fnOne fn = JSNumericLiteral ss (Left 1)
---     | isDict boundedBoolean dict && isFn fnBottom fn = JSBooleanLiteral ss False
---     | isDict boundedBoolean dict && isFn fnTop fn = JSBooleanLiteral ss True
---   convert (JSApp ss (JSApp _ (JSApp _ fn [dict]) [x]) [y])
---     | isDict semiringInt dict && isFn fnAdd fn = intOp ss Add x y
---     | isDict semiringInt dict && isFn fnMultiply fn = intOp ss Multiply x y
---     | isDict euclideanRingInt dict && isFn fnDivide fn = intOp ss Divide x y
---     | isDict ringInt dict && isFn fnSubtract fn = intOp ss Subtract x y
---   convert other = other
---   fnZero = (C.dataSemiring, C.zero)
---   fnOne = (C.dataSemiring, C.one)
---   fnBottom = (C.dataBounded, C.bottom)
---   fnTop = (C.dataBounded, C.top)
---   fnAdd = (C.dataSemiring, C.add)
---   fnDivide = (C.dataEuclideanRing, C.div)
---   fnMultiply = (C.dataSemiring, C.mul)
---   fnSubtract = (C.dataRing, C.sub)
---   intOp ss op x y = JSBinary ss BitwiseOr (JSBinary ss op x y) (JSNumericLiteral ss (Left 0))
---
+  convert (EApp fn [dict])
+    | isDict semiringInt    dict && isUncurriedFn fnZero fn = ENumericLiteral (Left  0) 
+    | isDict semiringNumber dict && isUncurriedFn fnZero fn = ENumericLiteral (Right 0.0)
+    | isDict semiringInt    dict && isUncurriedFn fnOne  fn = ENumericLiteral (Left  1) 
+    | isDict semiringNumber dict && isUncurriedFn fnOne  fn = ENumericLiteral (Right 1.0)
+
+    | isDict boundedBoolean dict && isUncurriedFn fnBottom fn = EAtomLiteral $ Atom Nothing "false"
+    | isDict boundedBoolean dict && isUncurriedFn fnTop    fn = EAtomLiteral $ Atom Nothing "true"
+  convert other = other
+
+  fnZero = (EC.dataSemiring, C.zero)
+  fnOne = (EC.dataSemiring, C.one)
+  fnBottom = (C.dataBounded, C.bottom)
+  fnTop = (C.dataBounded, C.top)
+
 inlineCommonOperators :: Erl -> Erl
 inlineCommonOperators = applyAll
   [ binary semiringNumber opAdd Add
@@ -201,8 +194,8 @@ ordChar = (EC.dataOrd, C.ordChar)
 -- semigroupString :: forall a b. (IsString a, IsString b) => (a, b)
 -- semigroupString = (EC.dataSemigroup, C.semigroupString)
 
--- boundedBoolean :: forall a b. (IsString a, IsString b) => (a, b)
--- boundedBoolean = (EC.dataBounded, C.boundedBoolean)
+boundedBoolean :: forall a b. (IsString a, IsString b) => (a, b)
+boundedBoolean = (EC.dataBounded, C.boundedBoolean)
 
 heytingAlgebraBoolean :: forall a b. (IsString a, IsString b) => (a, b)
 heytingAlgebraBoolean = (EC.dataHeytingAlgebra, C.heytingAlgebraBoolean)
