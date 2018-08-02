@@ -5,7 +5,7 @@ import Data.String (IsString)
 -- Modules
 
 prim :: forall a. (IsString a) => a
-prim = "prim@ps@ps"
+prim = "prim@ps"
 
 prelude :: forall a. (IsString a) => a
 prelude = "prelude@ps"

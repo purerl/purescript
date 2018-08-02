@@ -19,7 +19,7 @@ isFn (moduleName, fnName) (EApp (EAtomLiteral (Atom (Just x) y)) []) =
 isFn _ _ = False
 
 isDict :: (Text, PSString) -> Erl -> Bool
-isDict (moduleName, dictName) (EApp (EAtomLiteral (Atom (Just x) y)) []) = x == moduleName && y == (atomPS dictName <> "@c")
+isDict (moduleName, dictName) (EApp (EAtomLiteral (Atom (Just x) y)) []) = x == moduleName && y == atomPS dictName
 isDict _ _ = False
 
 isUncurriedFn :: (Text, PSString) -> Erl -> Bool

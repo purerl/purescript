@@ -17,7 +17,7 @@ import Data.Traversable
 import Data.Foldable
 import Data.Monoid
 import qualified Data.Map as M
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (fromMaybe, mapMaybe, catMaybes)
 import Control.Monad.Error.Class (MonadError(..))
 
 import Control.Arrow (first, second)
@@ -91,7 +91,7 @@ moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports foreignTypes
       getType ident = (\(t, _, _) -> t) <$> M.lookup (Qualified (Just mn) ident) (E.names env)
 
       onRecBind ((_, ident), _) = getType ident
-      onBind (NonRec _ ident _) = mapMaybe id [ getType ident ]
+      onBind (NonRec _ ident _) = catMaybes [ getType ident ]
       onBind (Rec vals) = mapMaybe onRecBind vals
 
   biconcat :: [([a], [b])] -> ([a], [b])
@@ -108,10 +108,10 @@ moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports foreignTypes
         body = EApp (EAtomLiteral $ qualifiedToErl' mn ForeignModule ident) (take arity $ map EVar args)
         body' = curriedApp (drop arity $ map EVar args) body
         fun = curriedLambda body' args
-        nameC = curriedName (Atom Nothing $ identToAtomName ident)
-        nameUC = uncurriedName (Atom Nothing $ identToAtomName ident)
-    in ([(nameC, 0), (nameUC, fullArity)],
-        [ EFunctionDef nameC [] fun, EFunctionDef nameUC args body'])
+        name = Atom Nothing $ identToAtomName ident
+    in ([ (name, fullArity) ], [ EFunctionDef name args body' ])
+    <> if fullArity == 0 then ( [], [] )
+       else ([(name, 0)], [EFunctionDef name [] fun])
 
   curriedLambda :: Erl -> [T.Text] -> Erl
   curriedLambda = foldr (EFun Nothing)
@@ -139,30 +139,20 @@ moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports foreignTypes
   topNonRecToErl _ ident val = do
     erl <- valueToErl val
     let (_, _, _, meta') = extractAnn val
-    let ident' = case meta' of
+        ident' = case meta' of
           Just IsTypeClassConstructor -> identToTypeclassCtor ident
           _ -> Atom Nothing $ runIdent ident
-    let arity = fromMaybe 0 (M.lookup (Qualified (Just mn) ident) arities)
-    let vars = map (\m -> "X" <> T.pack (show m)) [ 1..arity ]
-    pure
-      ( [ (uncurriedName ident', arity)
-        , (curriedName ident', 0)
-        ]
-      , [ EFunctionDef (uncurriedName ident') vars $ curriedApp (map EVar vars) erl
-        , EFunctionDef (curriedName ident') [] erl
-        ]
-      )
-
-  uncurriedName = id
-
-  curriedName (Atom q t) = Atom q (t <> "@c")
-  curriedName x = x
+        arity = fromMaybe 0 (M.lookup (Qualified (Just mn) ident) arities)
+        vars = map (\m -> "X" <> T.pack (show m)) [ 1..arity ]
+        
+        curried = ( [ (ident', 0) ], [ EFunctionDef ident' [] erl ] )
+        uncurried = if arity == 0 then ( [], [] )
+                    else ( [ (ident', arity) ], [ EFunctionDef ident' vars $ curriedApp (map EVar vars) erl ] )
+    pure $ curried <> uncurried
 
   bindToErl :: Bind Ann -> m [Erl]
   bindToErl (NonRec _ ident val) =
     pure <$> EVarBind (identToVar ident) <$> valueToErl' (Just ident) val
-  -- bindToErl (Rec [((ann, ident), val)]) =
-  --   pure <$> EVarBind (identToVar ident) <$> valueToErl' (Just ident) val
 
   -- For recursive bindings F(X) = E1, G(X) = E2, ... we have a problem as the variables are not
   -- in scope until each expression is defined. To avoid lifting to the top level first generate
@@ -203,7 +193,7 @@ moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports foreignTypes
     rethrowWithPosition pos $ literalToValueErl l
   valueToErl' _ (Var _ (Qualified (Just (ModuleName [ProperName prim])) (Ident undef))) | prim == C.prim, undef == C.undefined =
     return $ EAtomLiteral $ Atom Nothing C.undefined
-  valueToErl' _ (Var _ ident) | isTopLevelBinding ident = return $ EApp (EAtomLiteral $ curriedName $ qualifiedToErl ident) []
+  valueToErl' _ (Var _ ident) | isTopLevelBinding ident = return $ EApp (EAtomLiteral $ qualifiedToErl ident) []
   valueToErl' _ (Var _ ident) = return $ EVar $ qualifiedToVar ident
 
   valueToErl' ident (Abs _ arg val) = do
@@ -232,7 +222,7 @@ moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports foreignTypes
       Var _ qi@(Qualified _ _)
         | arity <- fromMaybe 0 (M.lookup qi arities)
         , length args == arity
-        -> return $ EApp (EAtomLiteral (uncurriedName $ qualifiedToErl qi)) args'
+        -> return $ EApp (EAtomLiteral (qualifiedToErl qi)) args'
 
       _ -> curriedApp args' <$> valueToErl f
     where
