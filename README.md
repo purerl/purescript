@@ -4,7 +4,7 @@ A small strongly typed programming language with expressive types that compiles 
 
 This fork is a PureScript backend targetting Erlang source. The [purerl](https://github.com/purerl) organisation hosts ports of some core libraries.
 
-To use it, it is recommended to use [psc-package](https://github.com/purescript/psc-package) and the purerl package sets. In a psc-package project, compile with something like
+To use it, it is recommended to use [psc-package](https://github.com/purescript/psc-package) and the [purerl package sets](https://github.com/purerl/package-sets). In a psc-package project, compile with something like
 ```
 psc-package sources | xargs purs 'src/**/*.purs'
 ```
@@ -16,7 +16,7 @@ purs 'bower_components/purescript-*/src/**/*.purs' 'src/**/*.purs'
 Then build and run the Erlang output:
 ```
 erlc -o ebin/ output/*/*.erl
-erl -pa ebin -noshell -eval '(main@ps:main@c())()' -eval 'init:stop()'
+erl -pa ebin -noshell -eval '(main@ps:main())()' -eval 'init:stop()'
 ```
 
 See [hello-world](https://github.com/purerl/hello-world/) example.
@@ -36,7 +36,7 @@ Top level declarations are uniformly output as nullary functions. Identifiers ar
 | `Int` | `integer()` | Arbitrary precision - no longer a `Bounded` |
 | `Number` | `float()` |
 | `Boolean` | `boolean()` |
-| `String` | `string()` | Should consider `binary()` representation |
+| `String` | `binary()` | (`utf8` encoded) |
 | `Array` | `array()` | Not to be confused with erlang `[]` list syntax. |
 | Records | `#{atom() => any()}` | Map keyed by atoms |
 | Tagged union | Tuple with tag element | e.g. `Some 42` is `{some, 42}` |
@@ -45,6 +45,7 @@ Top level declarations are uniformly output as nullary functions. Identifiers ar
 | `Data.Function.Uncurried.FnX` | Function (arity `X`) | Actual higher arity functions - for 'uncurried' functions from tuples see `Erl.Data.Tuple`  | 
 | `Erl.Data.List`  | `list()`| Native lists via  `purescript-erl-lists` |
 | `Erl.Data.Tuple` | `tuple()` | Native tuples via `purescript-erl-tuples` |
+| `Erl.Data.Map` | `tuple()` | Map with homogenous key/value types |
 
 # FFI
 In place of `.js` FFI files, the Erlang backend has `.erl` FFI files. As per the regular compiler since 0.9, these must be placed along the corresponding `.purs` file with the same name.
@@ -55,7 +56,7 @@ PureScript file `Foo/MyModule.purs`
 Erlang file: `Foo/MyModule.erl`
 Erlang module: `foo_myModule@foreign`
 
-Note that the FFI code for a module must not only be in a file named correctly, but the module must be named the same as the output module with `@foreign` appended.
+Note that the FFI code for a module must not only be in a file named correctly, but the module must be named the same as the output module with `@foreign` appended (so *not* following the Erlang module naming requirement until this gets copied to output).
 
 FFI files *MUST* export explicitly the exact set of identifiers which will be imported by the corresponding PureScript file. The compiler will check these exports and use them to inform codegen.
 
