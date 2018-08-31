@@ -1,4 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 -- |
 -- Data types for the intermediate simplified-Erlang AST
@@ -59,7 +60,6 @@ data Erl
   -- |
   -- A fun definition
   --
-  | EFun (Maybe Text) Text Erl
   | EFunFull (Maybe Text) [(EFunBinder, Erl)]
   -- |
   -- Function application
@@ -91,6 +91,19 @@ data Erl
   | EAttribute PSString PSString
 
   deriving (Show, Eq)
+
+-- | Simple 0-arity version of EFun1
+pattern EFun0 :: Maybe Text -> Erl -> Erl
+pattern EFun0 name e = EFunFull name [(EFunBinder [] Nothing, e)]
+
+-- | Simple fun definition fun f(X) -> e end (arity 1 with single head with simple variable pattern, name optional)
+pattern EFun1 :: Maybe Text -> Text -> Erl -> Erl
+pattern EFun1 name var e = EFunFull name [(EFunBinder [EVar var] Nothing, e)]
+
+-- | Simple arity-N version of EFun1
+pattern EFunN :: Maybe Text -> [Text] -> Erl -> Erl
+pattern EFunN name vars e <- EFunFull name [(EFunBinder (map (\(EVar x) -> x) -> vars) Nothing, e)] where
+  EFunN name vars e = EFunFull name [(EFunBinder (map EVar vars) Nothing, e)]
 
 data EFunBinder
  = EFunBinder [Erl] (Maybe Guard)
@@ -246,7 +259,6 @@ everywhereOnErl f = go
   go (EBinary op e1 e2) = f $ EBinary op (go e1) (go e2)
   go (EFunctionDef a ss e) = f $ EFunctionDef a ss (go e)
   go (EVarBind x e) = f $ EVarBind x (go e)
-  go (EFun x s e) = f $ EFun x s (go e)
   go (EFunFull fname args) = f $ EFunFull fname $ map (second go) args
   go (EApp e es) = f $ EApp (go e) (map go es)
   go (EBlock es) = f $ EBlock (map go es)
@@ -273,7 +285,6 @@ everywhereOnErlTopDownM f = f >=> go
   go (EBinary op e1 e2) = EBinary op <$> f' e1 <*> f' e2
   go (EFunctionDef a ss e) = EFunctionDef a ss <$> f' e
   go (EVarBind x e) = EVarBind x <$> f' e
-  go (EFun x s e) = EFun x s <$> f' e
   go (EFunFull fname args) = EFunFull fname <$> fargs args
   go (EApp e es) = EApp <$> f' e <*> traverse f' es
   go (EBlock es) = EBlock <$> traverse f' es

@@ -16,12 +16,17 @@ import qualified Data.Text as T
 import Data.Traversable
 import Data.Foldable
 import Data.Monoid
+import Control.Monad (unless)
+
+import qualified Data.Set as Set
+
 import qualified Data.Map as M
 import Data.Maybe (fromMaybe, mapMaybe, catMaybes)
 import Control.Monad.Error.Class (MonadError(..))
-
+import Control.Applicative ((<|>))
 import Control.Arrow (first, second)
 import Control.Monad.Reader (MonadReader(..))
+import Control.Monad.Writer (MonadWriter(..))
 
 import Control.Monad.Supply.Class
 
@@ -40,7 +45,6 @@ import Language.PureScript.CodeGen.Erl.Optimizer
 freshNameErl :: (MonadSupply m) => m T.Text
 freshNameErl = fmap (("_@" <>) . T.pack . show) fresh
 
-
 identToTypeclassCtor :: Ident -> Atom
 identToTypeclassCtor a = Atom Nothing (runIdent a)
 
@@ -55,15 +59,26 @@ isTopLevelBinding (Qualified Nothing _) = False
 tyArity :: Type -> Int
 tyArity (TypeApp (TypeApp fn _) ty) | fn == E.tyFunction = 1 + tyArity ty
 tyArity (ForAll _ ty _) = tyArity ty
-tyArity (ConstrainedType _ ty) = 1 + tyArity ty
+tyArity (ConstrainedType _ ty) = 1 + tyArity ty 
 tyArity _ = 0
+
+uncurriedFnArity :: ModuleName -> T.Text -> Type -> Maybe Int
+uncurriedFnArity moduleName fnName = go (-1)
+  where
+    go :: Int -> Type -> Maybe Int
+    go n (TypeConstructor (Qualified (Just mn) (ProperName fnN)))
+      | n >= 1, n <= 10, fnN == (fnName <> T.pack (show n)), mn == moduleName
+      = Just n
+    go n (TypeApp t1 _) = go (n+1) t1
+    go n (ForAll _ ty _) = go n ty
+    go _ _ = Nothing
 
 -- |
 -- Generate code in the simplified Erlang intermediate representation for all declarations in a
 -- module.
 --
 moduleToErl :: forall m .
-    (Monad m, MonadReader Options m, MonadSupply m, MonadError MultipleErrors m)
+    (Monad m, MonadReader Options m, MonadSupply m, MonadError MultipleErrors m, MonadWriter MultipleErrors m)
   => E.Environment
   -> Module Ann
   -> [(T.Text, Int)]
@@ -75,6 +90,11 @@ moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports foreignTypes
     let (exports, erlDecls) = biconcat $ res <> map reExportForeign foreigns
     optimized <- traverse optimize erlDecls
     traverse_ checkExport foreignTypes
+    let usedFfi = Set.fromList (map (runIdent . fst) foreignTypes)
+        definedFfi = Set.fromList (map fst foreignExports)
+        unusedFfi = definedFfi Set.\\ usedFfi
+    unless (Set.null unusedFfi) $
+      tell $ errorMessage $ UnusedFFIImplementations mn (Ident <$> Set.toAscList unusedFfi)
 
     let attributes = findAttributes decls
 
@@ -97,8 +117,11 @@ moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports foreignTypes
   biconcat :: [([a], [b])] -> ([a], [b])
   biconcat x = (concatMap fst x, concatMap snd x)
 
+  types :: M.Map (Qualified Ident) Type
+  types = M.map (\(t, _, _) -> t) $ E.names env
+
   arities :: M.Map (Qualified Ident) Int
-  arities = M.map (\(t, _, _) -> tyArity t) $ E.names env
+  arities = tyArity <$> types
 
   reExportForeign :: Ident -> ([(Atom,Int)], [Erl])
   reExportForeign ident =
@@ -114,7 +137,7 @@ moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports foreignTypes
        else ([(name, 0)], [EFunctionDef name [] fun])
 
   curriedLambda :: Erl -> [T.Text] -> Erl
-  curriedLambda = foldr (EFun Nothing)
+  curriedLambda = foldr (EFun1 Nothing)
 
   exportArity :: Ident -> Int
   exportArity ident = fromMaybe 0 $ findExport $ runIdent ident
@@ -135,6 +158,12 @@ moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports foreignTypes
   topBindToErl (NonRec ann ident val) = topNonRecToErl ann ident val
   topBindToErl (Rec vals) = biconcat <$> traverse (uncurry . uncurry $ topNonRecToErl) vals
 
+  uncurriedFnArity' :: ModuleName -> T.Text -> Qualified Ident -> Maybe Int
+  uncurriedFnArity' fnMod fn ident =
+    case M.lookup ident types of
+      Just t -> uncurriedFnArity fnMod fn t
+      _ -> Nothing
+
   topNonRecToErl :: Ann -> Ident -> Expr Ann -> m ([(Atom,Int)], [ Erl ])
   topNonRecToErl _ ident val = do
     erl <- valueToErl val
@@ -142,17 +171,23 @@ moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports foreignTypes
         ident' = case meta' of
           Just IsTypeClassConstructor -> identToTypeclassCtor ident
           _ -> Atom Nothing $ runIdent ident
-        arity = fromMaybe 0 (M.lookup (Qualified (Just mn) ident) arities)
-        vars = map (\m -> "X" <> T.pack (show m)) [ 1..arity ]
+        qident = Qualified (Just mn) ident
+
+        vars arity = map (\m -> "X" <> T.pack (show m)) [ 1..arity ]
         
         curried = ( [ (ident', 0) ], [ EFunctionDef ident' [] erl ] )
-        uncurried = if arity == 0 then ( [], [] )
-                    else ( [ (ident', arity) ], [ EFunctionDef ident' vars $ curriedApp (map EVar vars) erl ] )
+        effFnArity = uncurriedFnArity' (ModuleName [ ProperName "Effect", ProperName "Uncurried" ]) "EffectFn" qident
+        fnArity = uncurriedFnArity' (ModuleName [ ProperName "Data", ProperName "Function", ProperName "Uncurried" ]) "Fn" qident
+        uncurried = case fromMaybe 0 (M.lookup qident arities) of
+          _ | Just arity <- effFnArity <|> fnArity ->
+            ( [ (ident', arity) ], [ EFunctionDef ident' (vars arity) $ EApp erl (map EVar (vars arity)) ] )
+          0 -> ( [], [] )
+          arity -> ( [ (ident', arity) ], [ EFunctionDef ident' (vars arity) $ curriedApp (map EVar (vars arity)) erl ] )
     pure $ curried <> uncurried
 
   bindToErl :: Bind Ann -> m [Erl]
   bindToErl (NonRec _ ident val) =
-    pure <$> EVarBind (identToVar ident) <$> valueToErl' (Just ident) val
+    pure . EVarBind (identToVar ident) <$> valueToErl' (Just ident) val
 
   -- For recursive bindings F(X) = E1, G(X) = E2, ... we have a problem as the variables are not
   -- in scope until each expression is defined. To avoid lifting to the top level first generate
@@ -161,8 +196,8 @@ moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports foreignTypes
   -- and then bind these F = F'({F',G'})
   -- TODO: Only do this if there are multiple mutually recursive bindings! Else a named fun works.
   bindToErl (Rec vals) = do
-    let vars = (identToVar . snd . fst) <$> vals
-        varTup = ETupleLiteral $ EVar <$> (<> "@f") <$> vars
+    let vars = identToVar . snd . fst <$> vals
+        varTup = ETupleLiteral $ EVar . (<> "@f") <$> vars
         replaceFun fvar = everywhereOnErl go
           where
             go (EVar f) | f == fvar = EApp (EVar $ f <> "@f") [varTup]
@@ -198,7 +233,7 @@ moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports foreignTypes
 
   valueToErl' ident (Abs _ arg val) = do
     ret <- valueToErl val
-    return $ EFun (fmap identToVar ident) (identToVar arg) ret
+    return $ EFun1 (fmap identToVar ident) (identToVar arg) ret
 
   valueToErl' _ (Accessor _ prop val) = do
     eval <- valueToErl val
@@ -247,15 +282,15 @@ moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports foreignTypes
   valueToErl' _ (Constructor _ _ (ProperName ctor) fields) =
     let createFn =
           let body = constructorLiteral ctor ((EVar . identToVar) `map` fields)
-          in foldr (\f inner -> EFun Nothing (identToVar f) inner) body fields
+          in foldr (\f inner -> EFun1 Nothing (identToVar f) inner) body fields
     in pure createFn
 
-  iife exprs = EApp (EFunFull Nothing [(EFunBinder [] Nothing, (EBlock exprs))]) []
+  iife exprs = EApp (EFun0 Nothing (EBlock exprs)) []
 
   constructorLiteral name args = ETupleLiteral (EAtomLiteral (Atom Nothing (toAtomName name)) : args)
 
   curriedApp :: [Erl] -> Erl -> Erl
-  curriedApp args' body = flip (foldl (\fn a -> EApp fn [a])) args' body
+  curriedApp = flip (foldl (\fn a -> EApp fn [a]))
 
   literalToValueErl :: Literal (Expr Ann) -> m Erl
   literalToValueErl = literalToValueErl' EMapLiteral valueToErl
@@ -297,8 +332,8 @@ moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports foreignTypes
         Right e -> do
           e' <- valueToErl e
           pure ([], [(EFunBinder bs Nothing, e')])
-        Left guards -> first concat <$> unzip <$> mapM (guard bs) guards
-      pure (es ++ map ((\f -> f $ (EFunBinder bs Nothing)) . fst) erls, res, map (first EVar . snd) erls)
+        Left guards -> first concat . unzip <$> mapM (guard bs) guards
+      pure (es ++ map ((\f -> f (EFunBinder bs Nothing)) . fst) erls, res, map (first EVar . snd) erls)
     guard bs (ge, e) = do
       var <- freshNameErl
       ge' <- valueToErl ge

@@ -27,17 +27,13 @@ magicDo'' effectModule C.EffectDictionaries{..} = everywhereOnErl undo . everywh
 
   convert :: Erl -> Erl
   -- Desugar pure
-  convert (EApp (pure'@(EApp _ [_, val])) []) | isPure pure' = val
+  convert (EApp pure'@(EApp _ [_, val]) []) | isPure pure' = val
   -- Desugar discard
-  convert discard@(EApp _ [_, _, m, EFun Nothing _ e]) | isDiscard discard =
-    EFunFull (Just fnName) [(EFunBinder [] Nothing, EBlock ((EApp m []) : [ EApp e [] ]))]
+  convert discard@(EApp _ [_, _, m, EFun1 Nothing _ e]) | isDiscard discard =
+    EFun0 (Just fnName) (EBlock ((EApp m []) : [ EApp e [] ]))
   -- Desugar bind
-  convert bind'@(EApp _ [_, m, EFun Nothing var e]) | isBind bind' =
-    EFunFull (Just fnName) [(EFunBinder [] Nothing, EBlock (EVarBind var (EApp m []) : [ EApp e [] ]))]
-
-  -- TODO remove with pattern synonym?
-  convert bind'@(EApp _ [_, m, EFunFull Nothing [(EFunBinder [EVar var] Nothing, e)] ]) | isBind bind' =
-    EFunFull (Just fnName) [(EFunBinder [] Nothing, EBlock (EVarBind var (EApp m []) : [ EApp e [] ]))]
+  convert bind'@(EApp _ [_, m, EFun1 Nothing var e]) | isBind bind' =
+    EFun0 (Just fnName) (EBlock (EVarBind var (EApp m []) : [ EApp e [] ]))
 
   -- TODO Inline double applications?
   convert other = other
@@ -63,5 +59,5 @@ magicDo'' effectModule C.EffectDictionaries{..} = everywhereOnErl undo . everywh
 
   -- Remove __do function applications which remain after desugaring
   undo :: Erl -> Erl
-  undo (EApp (EFunFull (Just ident) [(EFunBinder [] Nothing, body)]) []) | ident == fnName = body
+  undo (EApp (EFun0 (Just ident) body) []) | ident == fnName = body
   undo other = other

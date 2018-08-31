@@ -45,9 +45,6 @@ isRebound x =
   snd . flip runState False . everywhereOnErlTopDownM go 
   where
   go :: Erl -> State Bool Erl
-  go e@(EFun _ x' _) | x == x' = do
-    put True
-    pure e
   go e@(EFunFull _ args) = do
     when (any matchBinder args) $ put True
     pure e

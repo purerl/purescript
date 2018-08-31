@@ -58,5 +58,8 @@ dataFunction = "data_function@ps"
 dataFunctionUncurried :: forall a. (IsString a) => a
 dataFunctionUncurried = "data_function_uncurried@ps"
 
+effectUncurried :: forall a. (IsString a) => a
+effectUncurried = "effect_uncurried@ps"
+
 dataIntBits :: forall a. (IsString a) => a
 dataIntBits = "data_int_bits@ps"

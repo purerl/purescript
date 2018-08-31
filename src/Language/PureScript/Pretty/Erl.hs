@@ -83,7 +83,7 @@ literals = mkPattern' match
       ]
 
   match (EFunRef x n) = return $ emit $ "fun " <> runAtom x <> "/" <> T.pack (show n)
-  match (EFun name x e) = mconcat <$> sequence
+  match (EFun1 name x e) = mconcat <$> sequence
     [ return $ emit $ "fun " <> fromMaybe "" name <> "(" <> x <> ") ->\n"
     , withIndent $ matchBody e
     , return $ emit "\n"

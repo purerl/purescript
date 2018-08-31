@@ -45,8 +45,7 @@ import           Language.PureScript.Environment
 import           Language.PureScript.Errors
 import           Language.PureScript.CodeGen.Erl.Common (atomModuleName, ModuleType(..))
 import           Language.PureScript.Make.Monad
-import           Language.PureScript.Names
-import           Language.PureScript.Names (runModuleName, ModuleName)
+import           Language.PureScript.Names (runModuleName, ModuleName, Ident)
 import           Language.PureScript.Types
 import           Language.PureScript.Options
 import qualified Language.PureScript.Parser as PSParser
