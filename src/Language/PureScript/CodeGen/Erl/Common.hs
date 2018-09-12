@@ -6,6 +6,7 @@ module Language.PureScript.CodeGen.Erl.Common
 , atomPS
 , atom
 , atomModuleName
+, erlModuleName
 , ModuleType(..)
 , toAtomName
 , toVarName
@@ -102,7 +103,10 @@ atom s
 data ModuleType = ForeignModule | PureScriptModule
 
 atomModuleName :: ModuleName -> ModuleType -> Text
-atomModuleName (ModuleName pns) moduleType = intercalate "_" ((toAtomName . runProperName) `map` pns) <>
+atomModuleName mn mt = atom $ erlModuleName mn mt
+
+erlModuleName :: ModuleName -> ModuleType -> Text
+erlModuleName (ModuleName pns) moduleType = intercalate "_" ((toAtomName . runProperName) `map` pns) <>
   case moduleType of
     ForeignModule -> "@foreign"
     PureScriptModule -> "@ps"

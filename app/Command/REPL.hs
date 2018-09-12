@@ -35,6 +35,7 @@ import           Data.Monoid ((<>))
 import           Data.String (IsString(..))
 import           Data.Text (Text, unpack)
 import           Data.Traversable (for)
+import qualified Data.Set as S
 import qualified Language.PureScript as P
 import qualified Language.PureScript.Bundle as Bundle
 import           Language.PureScript.Interactive
@@ -49,7 +50,7 @@ import qualified Options.Applicative as Opts
 import           System.Console.Haskeline
 import           System.IO.UTF8 (readUTF8File)
 import           System.Exit
-import           System.Directory (doesFileExist, getCurrentDirectory)
+import           System.Directory (doesFileExist, getCurrentDirectory, createDirectoryIfMissing)
 import           System.FilePath ((</>))
 import           System.FilePath.Glob (glob)
 import           System.Process (readProcessWithExitCode)
@@ -90,7 +91,49 @@ port = Opts.option Opts.auto $
 backend :: Opts.Parser Backend
 backend =
   (browserBackend <$> port)
+  <|> (erlBackend <$> erlOption)
   <|> (nodeBackend <$> nodePathOption <*> nodeFlagsOption)
+
+erlOption :: Opts.Parser ()
+erlOption = Opts.flag' () (Opts.long "erl")
+  -- <> Opts.help "Use the erlang shell backend"
+
+erlBackend :: () -> Backend
+erlBackend () = Backend setup eval reload shutdown (P.defaultOptions { P.optionsCodegenTargets = S.singleton P.Erl })
+  where
+    compileBeam :: Bool -> [String] -> IO ()
+    compileBeam noisy files = do 
+      result <- readProcessWithExitCode "erlc" (["-o", ".psci_modules/ebin"] ++ files) ""
+      when noisy $
+        putStrResult result
+
+    setup :: IO ()
+    setup = do
+      createDirectoryIfMissing True ".psci_modules/ebin"
+      files <- glob ".psci_modules/node_modules/*/*.erl"
+      compileBeam True files
+
+    eval :: () -> String -> IO ()
+    eval _ _ = do
+      compileBeam False [".psci_modules/node_modules/__PSCI/__PSCI@ps.erl"]
+      result <- readProcessWithExitCode "erl" ["-pa", ".psci_modules/ebin", "-noshell", "-eval", "('__PSCI@ps':'$main'())()", "-s", "erlang", "halt"] ""
+      putStrResult result
+      
+    putStrResult :: (ExitCode, String, String) -> IO ()
+    putStrResult result = 
+      case result of
+        (ExitSuccess, out, _) -> when (out /= "") $ putStrLn out
+        (ExitFailure _, out, err) -> case err of
+          "" -> do 
+            putStrLn "Error"
+            putStrLn out
+          _ -> putStrLn err
+
+    reload :: () -> IO ()
+    reload _ = return ()
+
+    shutdown :: () -> IO ()
+    shutdown _ = return ()
 
 psciOptions :: Opts.Parser PSCiOptions
 psciOptions = PSCiOptions <$> many inputFile
@@ -138,6 +181,7 @@ data Backend = forall state. Backend
   -- ^ Reload the compiled code
   , _backendShutdown :: state -> IO ()
   -- ^ Shut down the backend
+  , _buildOptions :: P.Options
   }
 
 -- | Commands which can be sent to the browser
@@ -161,7 +205,7 @@ data BrowserState = BrowserState
   }
 
 browserBackend :: Int -> Backend
-browserBackend serverPort = Backend setup evaluate reload shutdown
+browserBackend serverPort = Backend setup evaluate reload shutdown (P.defaultOptions { P.optionsCodegenTargets = S.singleton P.JS })
   where
     setup :: IO BrowserState
     setup = do
@@ -280,7 +324,7 @@ browserBackend serverPort = Backend setup evaluate reload shutdown
       putStrLn result
 
 nodeBackend :: Maybe FilePath -> [String] -> Backend
-nodeBackend nodePath nodeArgs = Backend setup eval reload shutdown
+nodeBackend nodePath nodeArgs = Backend setup eval reload shutdown (P.defaultOptions { P.optionsCodegenTargets = S.singleton P.JS })
   where
     setup :: IO ()
     setup = return ()
@@ -311,6 +355,7 @@ command = loop <$> options
     loop :: PSCiOptions -> IO ()
     loop PSCiOptions{..} = do
         inputFiles <- concat <$> traverse glob psciInputGlob
+        let Backend _ _ _ _ buildOpts = psciBackend
         e <- runExceptT $ do
           modules <- ExceptT (loadAllModules inputFiles)
           when (null modules) . liftIO $ do
@@ -319,10 +364,10 @@ command = loop <$> options
           unless (supportModuleIsDefined (map snd modules)) . liftIO $ do
             putStr supportModuleMessage
             exitFailure
-          (externs, env) <- ExceptT . runMake . make $ modules
+          (externs, env) <- ExceptT . (runMake buildOpts) . make $ modules
           return (modules, externs, env)
         case psciBackend of
-          Backend setup eval reload (shutdown :: state -> IO ()) ->
+          Backend setup eval reload (shutdown :: state -> IO ()) _ ->
             case e of
               Left errs -> do
                 pwd <- getCurrentDirectory
@@ -331,7 +376,7 @@ command = loop <$> options
                 historyFilename <- getHistoryFilename
                 let settings = defaultSettings { historyFile = Just historyFilename }
                     initialState = updateLoadedExterns (const (zip (map snd modules) externs)) initialPSCiState
-                    config = PSCiConfig psciInputGlob env
+                    config = PSCiConfig psciInputGlob env buildOpts
                     runner = flip runReaderT config
                              . flip evalStateT initialState
                              . runInputT (setComplete completion settings)

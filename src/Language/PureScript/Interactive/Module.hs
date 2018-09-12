@@ -47,7 +47,7 @@ createTemporaryModule exec st val =
   let
     imports       = psciImportedModules st
     lets          = psciLetBindings st
-    moduleName    = P.ModuleName [P.ProperName "$PSCI"]
+    moduleName    = temporaryName
     effModuleName = P.moduleNameFromString "Effect"
     effImport     = (effModuleName, P.Implicit, Just (P.ModuleName [P.ProperName "$Effect"]))
     supportImport = (supportModuleName, P.Implicit, Just (P.ModuleName [P.ProperName "$Support"]))
@@ -77,7 +77,7 @@ createTemporaryModuleForKind st typ =
   let
     imports    = psciImportedModules st
     lets       = psciLetBindings st
-    moduleName = P.ModuleName [P.ProperName "$PSCI"]
+    moduleName = temporaryName
     itDecl     = P.TypeSynonymDeclaration (internalSpan, []) (P.ProperName "IT") [] typ
   in
     P.Module internalSpan [] moduleName ((importDecl `map` imports) ++ lets ++ [itDecl]) Nothing
@@ -89,7 +89,7 @@ createTemporaryModuleForImports :: PSCiState -> P.Module
 createTemporaryModuleForImports st =
   let
     imports    = psciImportedModules st
-    moduleName = P.ModuleName [P.ProperName "$PSCI"]
+    moduleName = temporaryName
   in
     P.Module internalSpan [] moduleName (importDecl `map` imports) Nothing
 
@@ -98,6 +98,9 @@ importDecl (mn, declType, asQ) = P.ImportDeclaration (internalSpan, []) mn declT
 
 indexFile :: FilePath
 indexFile = ".psci_modules" ++ pathSeparator : "index.js"
+
+entryFileErl :: FilePath
+entryFileErl = ".psci_modules" ++ pathSeparator : "node_modules" ++ pathSeparator : "__PSCI" ++ pathSeparator : "__PSCI@ps.erl"
 
 modulesDir :: FilePath
 modulesDir = ".psci_modules" ++ pathSeparator : "node_modules"

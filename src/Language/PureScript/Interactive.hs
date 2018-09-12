@@ -41,7 +41,6 @@ import           Language.PureScript.Interactive.Printer      as Interactive
 import           Language.PureScript.Interactive.Types        as Interactive
 
 import           System.Directory (getCurrentDirectory)
-import           System.FilePath ((</>))
 import           System.FilePath.Glob (glob)
 
 -- | Pretty-print errors
@@ -52,8 +51,8 @@ printErrors errs = liftIO $ do
 
 -- | This is different than the runMake in 'Language.PureScript.Make' in that it specifies the
 -- options and ignores the warning messages.
-runMake :: P.Make a -> IO (Either P.MultipleErrors a)
-runMake mk = fst <$> P.runMake P.defaultOptions mk
+runMake :: P.Options -> P.Make a -> IO (Either P.MultipleErrors a)
+runMake opts mk = fst <$> P.runMake opts mk
 
 -- | Rebuild a module, using the cached externs data for dependencies.
 rebuild
@@ -124,9 +123,10 @@ handleReloadState reload = do
   modify $ updateLets (const [])
   globs <- asks psciFileGlobs
   files <- liftIO $ concat <$> traverse glob globs
+  opts <- asks psciBuildOptions
   e <- runExceptT $ do
     modules <- ExceptT . liftIO $ loadAllModules files
-    (externs, _) <- ExceptT . liftIO . runMake . make $ modules
+    (externs, _) <- ExceptT . liftIO . (runMake opts) . make $ modules
     return (map snd modules, externs)
   case e of
     Left errs -> printErrors errs
@@ -152,12 +152,13 @@ handleExpression
 handleExpression evaluate val = do
   st <- get
   let m = createTemporaryModule True st val
-  e <- liftIO . runMake $ rebuild (map snd (psciLoadedExterns st)) m
+  opts <- asks psciBuildOptions
+  e <- liftIO . (runMake opts) $ rebuild (map snd (psciLoadedExterns st)) m
   case e of
     Left errs -> printErrors errs
     Right _ -> do
-      js <- liftIO $ readFile (modulesDir </> "$PSCI" </> "index.js")
-      evaluate js
+      -- js <- liftIO $ readFile (modulesDir </> "$PSCI" </> "index.js")
+      evaluate "// js"
 
 -- |
 -- Takes a list of declarations and updates the environment, then run a make. If the declaration fails,
@@ -170,7 +171,8 @@ handleDecls
 handleDecls ds = do
   st <- gets (updateLets (++ ds))
   let m = createTemporaryModule False st (P.Literal P.nullSourceSpan (P.ObjectLiteral []))
-  e <- liftIO . runMake $ rebuild (map snd (psciLoadedExterns st)) m
+  opts <- asks psciBuildOptions
+  e <- liftIO . (runMake opts) $ rebuild (map snd (psciLoadedExterns st)) m
   case e of
     Left err -> printErrors err
     Right _ -> put st
@@ -236,7 +238,8 @@ handleImport
 handleImport im = do
    st <- gets (updateImportedModules (im :))
    let m = createTemporaryModuleForImports st
-   e <- liftIO . runMake $ rebuild (map snd (psciLoadedExterns st)) m
+   opts <- asks psciBuildOptions
+   e <- liftIO . (runMake opts) $ rebuild (map snd (psciLoadedExterns st)) m
    case e of
      Left errs -> printErrors errs
      Right _  -> put st
@@ -250,11 +253,12 @@ handleTypeOf
 handleTypeOf print' val = do
   st <- get
   let m = createTemporaryModule False st val
-  e <- liftIO . runMake $ rebuild (map snd (psciLoadedExterns st)) m
+  opts <- asks psciBuildOptions
+  e <- liftIO . (runMake opts) $ rebuild (map snd (psciLoadedExterns st)) m
   case e of
     Left errs -> printErrors errs
     Right (_, env') ->
-      case M.lookup (P.mkQualified (P.Ident "it") (P.ModuleName [P.ProperName "$PSCI"])) (P.names env') of
+      case M.lookup (P.mkQualified (P.Ident "it") temporaryName) (P.names env') of
         Just (ty, _, _) -> print' . P.prettyPrintType $ ty
         Nothing -> print' "Could not find type"
 
@@ -267,8 +271,9 @@ handleKindOf
 handleKindOf print' typ = do
   st <- get
   let m = createTemporaryModuleForKind st typ
-      mName = P.ModuleName [P.ProperName "$PSCI"]
-  e <- liftIO . runMake $ rebuild (map snd (psciLoadedExterns st)) m
+      mName = temporaryName
+  opts <- asks psciBuildOptions
+  e <- liftIO . (runMake opts) $ rebuild (map snd (psciLoadedExterns st)) m
   case e of
     Left errs -> printErrors errs
     Right (_, env') ->

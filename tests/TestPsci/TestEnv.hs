@@ -32,11 +32,11 @@ initTestPSCiEnv = do
       print err >> exitFailure
     Right modules -> do
       -- Make modules
-      makeResultOrError <- runMake . make $ modules
+      makeResultOrError <- runMake P.defaultOptions . make $ modules
       case makeResultOrError of
         Left errs -> putStrLn (P.prettyPrintMultipleErrors P.defaultPPEOptions errs) >> exitFailure
         Right (externs, env) ->
-          return (updateLoadedExterns (const (zip (map snd modules) externs)) initialPSCiState, PSCiConfig pursFiles env)
+          return (updateLoadedExterns (const (zip (map snd modules) externs)) initialPSCiState, PSCiConfig pursFiles env P.defaultOptions)
 
 -- | Execute a TestPSCi, returning IO
 execTestPSCi :: TestPSCi a -> IO a

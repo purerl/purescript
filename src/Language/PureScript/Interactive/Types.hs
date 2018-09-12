@@ -22,6 +22,7 @@ module Language.PureScript.Interactive.Types
   , replQueryStrings
   , showReplQuery
   , parseReplQuery
+  , temporaryName
   , Directive(..)
   ) where
 
@@ -41,6 +42,7 @@ import           Control.Monad.Writer.Strict (runWriterT)
 data PSCiConfig = PSCiConfig
   { psciFileGlobs           :: [String]
   , psciEnvironment         :: P.Environment
+  , psciBuildOptions        :: P.Options
   } deriving Show
 
 -- | The PSCI state.
@@ -89,6 +91,9 @@ initialPSCiState = PSCiState [] [] [] nullImports primExports
 --
 type ImportedModule = (P.ModuleName, P.ImportDeclarationType, Maybe P.ModuleName)
 
+temporaryName :: P.ModuleName
+temporaryName = P.ModuleName [P.ProperName "__PSCI"]
+
 psciImportedModuleNames :: PSCiState -> [P.ModuleName]
 psciImportedModuleNames st =
   map (\(mn, _, _) -> mn) (psciImportedModules st)
@@ -111,9 +116,6 @@ updateImportExports st@(PSCiState modules lets externs _ _) =
   desugarModule :: [P.Module] -> Either P.MultipleErrors (P.Env, [P.Module])
   desugarModule = runExceptT =<< hushWarnings . P.desugarImportsWithEnv (map snd externs)
   hushWarnings  = fmap fst . runWriterT
-
-  temporaryName :: P.ModuleName
-  temporaryName = P.ModuleName [P.ProperName "$PSCI"]
 
   temporaryModule :: P.Module
   temporaryModule =
