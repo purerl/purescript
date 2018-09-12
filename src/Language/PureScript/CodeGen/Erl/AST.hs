@@ -100,9 +100,14 @@ pattern EFun0 name e = EFunFull name [(EFunBinder [] Nothing, e)]
 pattern EFun1 :: Maybe Text -> Text -> Erl -> Erl
 pattern EFun1 name var e = EFunFull name [(EFunBinder [EVar var] Nothing, e)]
 
+extractVars :: [Erl] -> Maybe [Text]
+extractVars = traverse var
+  where var (EVar x) = Just x
+        var _ = Nothing
+
 -- | Simple arity-N version of EFun1
 pattern EFunN :: Maybe Text -> [Text] -> Erl -> Erl
-pattern EFunN name vars e <- EFunFull name [(EFunBinder (map (\(EVar x) -> x) -> vars) Nothing, e)] where
+pattern EFunN name vars e <- EFunFull name [(EFunBinder (extractVars -> Just vars) Nothing, e)] where
   EFunN name vars e = EFunFull name [(EFunBinder (map EVar vars) Nothing, e)]
 
 data EFunBinder
