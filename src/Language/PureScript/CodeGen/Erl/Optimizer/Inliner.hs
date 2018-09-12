@@ -16,7 +16,8 @@ import qualified Data.Text as T
 import Data.String (IsString)
 import Language.PureScript.PSString (PSString, mkString)
 import Data.Monoid ((<>))
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
+import qualified Data.Set as Set
 
 import Language.PureScript.CodeGen.Erl.AST
 import Language.PureScript.CodeGen.Erl.Optimizer.Common
@@ -32,12 +33,21 @@ etaConvert = everywhereOnErl convert
   where
     convert :: Erl -> Erl
     -- TODO ported from JS, but this seems to be beta-reduction and the iife below is eta...?
-    convert (EApp (EFun1 _ x e) [arg])
-      | shouldInline arg
-      , arg /= EVar x
-      , not (isRebound x e)
-      , not (isReboundE arg e) = replaceIdents [(x, arg)] e
+    convert (EApp (EFunN _ xs e) args)
+      | all shouldInline args
+      , xs `disjoint` mapMaybe unEVar args
+      , all (not . flip isRebound e) xs
+      , all (not . flip isReboundE e) args = replaceIdents (zip xs args) e
     convert e = e
+
+    unEVar (EVar x) = Just x
+    unEVar _ = Nothing
+
+    disjoint l1 l2 =
+      Set.null $ s1 `Set.intersection` s2
+      where
+        s1 = Set.fromList l1
+        s2 = Set.fromList l2
 
     isReboundE (EVar x) e = isRebound x e
     isReboundE _ _ = False

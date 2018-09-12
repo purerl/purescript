@@ -16,7 +16,7 @@ import qualified Data.Text as T
 import Data.Traversable
 import Data.Foldable
 import Data.Monoid
-import Control.Monad (unless)
+import Control.Monad (unless, replicateM)
 
 import qualified Data.Set as Set
 
@@ -87,7 +87,8 @@ moduleToErl :: forall m .
 moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports foreignTypes =
   rethrow (addHint (ErrorInModule mn)) $ do
     res <- traverse topBindToErl decls
-    let (exports, erlDecls) = biconcat $ res <> map reExportForeign foreigns
+    reexports <- traverse reExportForeign foreigns
+    let (exports, erlDecls) = biconcat $ res <> reexports
     optimized <- traverse optimize erlDecls
     traverse_ checkExport foreignTypes
     let usedFfi = Set.fromList (map (runIdent . fst) foreignTypes)
@@ -123,18 +124,18 @@ moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports foreignTypes
   arities :: M.Map (Qualified Ident) Int
   arities = tyArity <$> types
 
-  reExportForeign :: Ident -> ([(Atom,Int)], [Erl])
-  reExportForeign ident =
+  reExportForeign :: Ident -> m ([(Atom,Int)], [Erl])
+  reExportForeign ident = do
     let arity = exportArity ident
         fullArity = fromMaybe 0 (M.lookup (Qualified (Just mn) ident) arities)
-        args = map (\m -> "X" <> T.pack (show m)) [ 1..fullArity ]
-        body = EApp (EAtomLiteral $ qualifiedToErl' mn ForeignModule ident) (take arity $ map EVar args)
+    args <- replicateM fullArity freshNameErl
+    let body = EApp (EAtomLiteral $ qualifiedToErl' mn ForeignModule ident) (take arity $ map EVar args)
         body' = curriedApp (drop arity $ map EVar args) body
         fun = curriedLambda body' args
         name = Atom Nothing $ identToAtomName ident
-    in ([ (name, fullArity) ], [ EFunctionDef name args body' ])
-    <> if fullArity == 0 then ( [], [] )
-       else ([(name, 0)], [EFunctionDef name [] fun])
+    pure $ ([ (name, fullArity) ], [ EFunctionDef name args body' ])
+      <> if fullArity == 0 then ( [], [] )
+         else ([(name, 0)], [EFunctionDef name [] fun])
 
   curriedLambda :: Erl -> [T.Text] -> Erl
   curriedLambda = foldr (EFun1 Nothing)
@@ -173,16 +174,19 @@ moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports foreignTypes
           _ -> Atom Nothing $ runIdent ident
         qident = Qualified (Just mn) ident
 
-        vars arity = map (\m -> "X" <> T.pack (show m)) [ 1..arity ]
+        vars arity = replicateM arity freshNameErl
         
         curried = ( [ (ident', 0) ], [ EFunctionDef ident' [] erl ] )
         effFnArity = uncurriedFnArity' (ModuleName [ ProperName "Effect", ProperName "Uncurried" ]) "EffectFn" qident
         fnArity = uncurriedFnArity' (ModuleName [ ProperName "Data", ProperName "Function", ProperName "Uncurried" ]) "Fn" qident
-        uncurried = case fromMaybe 0 (M.lookup qident arities) of
-          _ | Just arity <- effFnArity <|> fnArity ->
-            ( [ (ident', arity) ], [ EFunctionDef ident' (vars arity) $ EApp erl (map EVar (vars arity)) ] )
-          0 -> ( [], [] )
-          arity -> ( [ (ident', arity) ], [ EFunctionDef ident' (vars arity) $ curriedApp (map EVar (vars arity)) erl ] )
+    uncurried <- case fromMaybe 0 (M.lookup qident arities) of
+          _ | Just arity <- effFnArity <|> fnArity -> do
+            avars <- vars arity
+            pure ( [ (ident', arity) ], [ EFunctionDef ident' avars $ EApp erl (map EVar avars) ] )
+          0 -> pure ( [], [] )
+          arity -> do
+            avars <- vars arity
+            pure ( [ (ident', arity) ], [ EFunctionDef ident' avars $ curriedApp (map EVar avars) erl ] )
     pure $ curried <> uncurried
 
   bindToErl :: Bind Ann -> m [Erl]
