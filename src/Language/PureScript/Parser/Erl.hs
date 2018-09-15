@@ -28,8 +28,7 @@ parseLine = P.try parseAttribute <|>
 
 parseAttribute :: P.Parsec Text u [(Text, Int)]
 parseAttribute = attributeParser "export"
-  (P.between (PC.char '[') (PC.char ']')
-    (atomArityParser `P.sepBy` PC.char ','))
+  (P.between (PC.char '[') (PC.char ']') (atomArityParser `P.sepBy` PC.char ','))
 
 -- P.Parsec String u Token
 --
@@ -49,6 +48,7 @@ atomArityParser = do
   a <- atomParser
   _ <- PC.char '/'
   n <- read <$> P.many1 PC.digit
+  PC.spaces
   pure (a, n)
 
 atomParser :: P.Parsec Text u Text
