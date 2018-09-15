@@ -19,6 +19,7 @@ import Data.Monoid
 import Control.Monad (unless, replicateM)
 
 import qualified Data.Set as Set
+import Data.Set (Set)
 
 import qualified Data.Map as M
 import Data.Maybe (fromMaybe, mapMaybe, catMaybes)
@@ -84,7 +85,7 @@ moduleToErl :: forall m .
   -> [(T.Text, Int)]
   -> [(Ident, Type)]
   -> m ([T.Text], [Erl])
-moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports foreignTypes =
+moduleToErl env (Module _ _ mn _ _ declaredExports foreigns decls) foreignExports foreignTypes =
   rethrow (addHint (ErrorInModule mn)) $ do
     res <- traverse topBindToErl decls
     reexports <- traverse reExportForeign foreigns
@@ -101,6 +102,9 @@ moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports foreignTypes
 
     return (map (\(a,i) -> runAtom a <> "/" <> T.pack (show i)) exports, attributes ++ optimized)
   where
+
+  declaredExportsSet :: Set Ident
+  declaredExportsSet = Set.fromList declaredExports
 
   findAttributes :: [Bind Ann] -> [Erl]
   findAttributes expr = map (uncurry EAttribute) $ mapMaybe getAttribute $ concatMap onBind expr
@@ -187,7 +191,11 @@ moduleToErl env (Module _ _ mn _ _ _ foreigns decls) foreignExports foreignTypes
           arity -> do
             avars <- vars arity
             pure ( [ (ident', arity) ], [ EFunctionDef ident' avars $ curriedApp (map EVar avars) erl ] )
-    pure $ curried <> uncurried
+    let res = curried <> uncurried
+    pure $ case ident `Set.member` declaredExportsSet of
+      True -> res
+      False -> ([], snd res)
+      
 
   bindToErl :: Bind Ann -> m [Erl]
   bindToErl (NonRec _ ident val) =
