@@ -13,6 +13,7 @@ import Language.PureScript.CodeGen.Erl.AST
 import Language.PureScript.CodeGen.Erl.Common
 import Language.PureScript.Pretty.Common hiding (withIndent)
 import Language.PureScript.PSString
+import Language.PureScript.AST.SourcePos
 
 import Data.Monoid
 import Data.Text (Text)
@@ -40,10 +41,16 @@ literals = mkPattern' match
     [ return $ emit $ x <> " = "
     , prettyPrintErl' e
     ]
-  match (EFunctionDef x xs e) = mconcat <$> sequence
+
+  match (EFunctionDef ss x xs e) = mconcat <$> sequence (
+    (case ss of
+      (Just (SourceSpan { spanName = spanName, spanStart = spanStart })) -> 
+        [ return $ emit $ "-file(\"" <> T.pack spanName <> "\", " <> (T.pack $ show $ sourcePosLine spanStart) <> ").\n" ]
+      _ -> [])
+    <>
     [ return $ emit $ runAtom x <> "(" <> intercalate "," xs <> ") -> "
     , prettyPrintErl' e
-    ]
+    ])
 
   match (EVar x) = return $ emit x
 

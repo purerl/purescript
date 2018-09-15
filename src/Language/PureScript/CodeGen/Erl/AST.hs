@@ -14,6 +14,7 @@ import Control.Monad.Identity
 import Control.Arrow (second)
 
 import Language.PureScript.PSString (PSString)
+import Language.PureScript.AST.SourcePos
 
 -- |
 -- Data type for simplified Erlang expressions
@@ -46,7 +47,7 @@ data Erl
   -- |
   -- Top-level function definition (over-simplified)
   --
-  | EFunctionDef Atom [Text] Erl
+  | EFunctionDef (Maybe SourceSpan) Atom [Text] Erl
   -- TODO not really a separate form. and misused
   | EVarBind Text Erl
   -- |
@@ -262,7 +263,7 @@ everywhereOnErl f = go
   go :: Erl -> Erl
   go (EUnary op e) = f $ EUnary op (go e)
   go (EBinary op e1 e2) = f $ EBinary op (go e1) (go e2)
-  go (EFunctionDef a ss e) = f $ EFunctionDef a ss (go e)
+  go (EFunctionDef ssann a ss e) = f $ EFunctionDef ssann a ss (go e)
   go (EVarBind x e) = f $ EVarBind x (go e)
   go (EFunFull fname args) = f $ EFunFull fname $ map (second go) args
   go (EApp e es) = f $ EApp (go e) (map go es)
@@ -288,7 +289,7 @@ everywhereOnErlTopDownM f = f >=> go
 
   go (EUnary op e) = EUnary op <$> f' e
   go (EBinary op e1 e2) = EBinary op <$> f' e1 <*> f' e2
-  go (EFunctionDef a ss e) = EFunctionDef a ss <$> f' e
+  go (EFunctionDef ssann a ss e) = EFunctionDef ssann a ss <$> f' e
   go (EVarBind x e) = EVarBind x <$> f' e
   go (EFunFull fname args) = EFunFull fname <$> fargs args
   go (EApp e es) = EApp <$> f' e <*> traverse f' es

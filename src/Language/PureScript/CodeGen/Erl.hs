@@ -137,9 +137,9 @@ moduleToErl env (Module _ _ mn _ _ declaredExports foreigns decls) foreignExport
         body' = curriedApp (drop arity $ map EVar args) body
         fun = curriedLambda body' args
         name = Atom Nothing $ identToAtomName ident
-    pure $ ([ (name, fullArity) ], [ EFunctionDef name args body' ])
+    pure $ ([ (name, fullArity) ], [ EFunctionDef Nothing name args body' ])
       <> if fullArity == 0 then ( [], [] )
-         else ([(name, 0)], [EFunctionDef name [] fun])
+         else ([(name, 0)], [EFunctionDef Nothing name [] fun])
 
   curriedLambda :: Erl -> [T.Text] -> Erl
   curriedLambda = foldr (EFun1 Nothing)
@@ -170,7 +170,7 @@ moduleToErl env (Module _ _ mn _ _ declaredExports foreigns decls) foreignExport
       _ -> Nothing
 
   topNonRecToErl :: Ann -> Ident -> Expr Ann -> m ([(Atom,Int)], [ Erl ])
-  topNonRecToErl _ ident val = do
+  topNonRecToErl (ss, _, _, _) ident val = do
     erl <- valueToErl val
     let (_, _, _, meta') = extractAnn val
         ident' = case meta' of
@@ -180,17 +180,17 @@ moduleToErl env (Module _ _ mn _ _ declaredExports foreigns decls) foreignExport
 
         vars arity = replicateM arity freshNameErl
         
-        curried = ( [ (ident', 0) ], [ EFunctionDef ident' [] erl ] )
+        curried = ( [ (ident', 0) ], [ EFunctionDef (Just ss) ident' [] erl ] )
         effFnArity = uncurriedFnArity' (ModuleName [ ProperName "Effect", ProperName "Uncurried" ]) "EffectFn" qident
         fnArity = uncurriedFnArity' (ModuleName [ ProperName "Data", ProperName "Function", ProperName "Uncurried" ]) "Fn" qident
     uncurried <- case fromMaybe 0 (M.lookup qident arities) of
           _ | Just arity <- effFnArity <|> fnArity -> do
             avars <- vars arity
-            pure ( [ (ident', arity) ], [ EFunctionDef ident' avars $ EApp erl (map EVar avars) ] )
+            pure ( [ (ident', arity) ], [ EFunctionDef (Just ss) ident' avars $ EApp erl (map EVar avars) ] )
           0 -> pure ( [], [] )
           arity -> do
             avars <- vars arity
-            pure ( [ (ident', arity) ], [ EFunctionDef ident' avars $ curriedApp (map EVar avars) erl ] )
+            pure ( [ (ident', arity) ], [ EFunctionDef (Just ss) ident' avars $ curriedApp (map EVar avars) erl ] )
     let res = curried <> uncurried
     pure $ case ident `Set.member` declaredExportsSet of
       True -> res
