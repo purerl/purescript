@@ -190,17 +190,25 @@ inlineCommonOperators = everywhereOnErlTopDown $ applyAll $
   runFn' :: Text -> Text -> (Erl -> [Erl] -> Erl) -> Int -> Erl -> Erl
   runFn' modName runFnName res n = convert where
     convert :: Erl -> Erl
-    convert e = fromMaybe e $ go n [] e
+    convert e = fromMaybe e $ go e
 
-    go :: Int -> [Erl] -> Erl -> Maybe Erl
-    go 0 acc (EApp runFnN [fn]) | isNFn modName runFnName n runFnN && length acc == n =
-      Just $ res fn acc
-    go m acc (EApp lhs [arg]) = go (m - 1) (arg : acc) lhs
-    go _ _   _ = Nothing
+    go :: Erl -> Maybe Erl
+    go (EApp runFnN (fn : args))
+      | isNFn modName runFnName n runFnN
+      , length args == n
+      = Just $ res (normaliseRef fn) args
+    go _ = Nothing
+
+    normaliseRef (EFunRef _ arity) | arity /= n = error "Should never see wrong arity here"
+    normaliseRef (EFunRef fn _) = EAtomLiteral fn
+    normaliseRef other = other
 
   isNFn :: Text -> Text -> Int -> Erl -> Bool
-  isNFn expectMod prefix n fn | isUncurriedFn (expectMod, (mkString $ prefix <> T.pack (show n))) fn = True
+  isNFn expectMod prefix n fn
+    | isUncurriedFn (expectMod, name) fn = True
+    where name = mkString $ prefix <> T.pack (show n)
   isNFn _ _ _ _ = False
+      
 
 semiringNumber :: forall a b. (IsString a, IsString b) => (a, b)
 semiringNumber = (EC.dataSemiring, C.semiringNumber)

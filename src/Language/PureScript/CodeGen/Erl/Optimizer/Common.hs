@@ -25,6 +25,9 @@ isUncurriedFn :: (Text, PSString) -> Erl -> Bool
 isUncurriedFn (moduleName, dictName) (EAtomLiteral (Atom (Just x) y)) = x == moduleName && y == atomPS dictName
 isUncurriedFn _ _ = False
 
+isCurriedFn :: (Text, PSString) -> Erl -> Bool
+isCurriedFn = isDict
+
 applyAll :: [a -> a] -> a -> a
 applyAll = foldl1 (.)
 

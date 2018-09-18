@@ -74,6 +74,12 @@ uncurriedFnArity moduleName fnName = go (-1)
     go n (ForAll _ ty _) = go n ty
     go _ _ = Nothing
 
+effectUncurried :: ModuleName
+effectUncurried = ModuleName [ ProperName "Effect", ProperName "Uncurried" ]
+
+dataFunctionUncurried :: ModuleName
+dataFunctionUncurried = ModuleName [ ProperName "Data", ProperName "Function", ProperName "Uncurried" ]
+
 -- |
 -- Generate code in the simplified Erlang intermediate representation for all declarations in a
 -- module.
@@ -169,33 +175,42 @@ moduleToErl env (Module _ _ mn _ _ declaredExports foreigns decls) foreignExport
       Just t -> uncurriedFnArity fnMod fn t
       _ -> Nothing
 
+  effFnArity = uncurriedFnArity' effectUncurried "EffectFn" 
+  fnArity = uncurriedFnArity' dataFunctionUncurried "Fn"
+      
   topNonRecToErl :: Ann -> Ident -> Expr Ann -> m ([(Atom,Int)], [ Erl ])
   topNonRecToErl (ss, _, _, _) ident val = do
-    erl <- valueToErl val
-    let (_, _, _, meta') = extractAnn val
+    let eann@(_, _, _, meta') = extractAnn val
         ident' = case meta' of
           Just IsTypeClassConstructor -> identToTypeclassCtor ident
           _ -> Atom Nothing $ runIdent ident
         qident = Qualified (Just mn) ident
 
-        vars arity = replicateM arity freshNameErl
-        
-        curried = ( [ (ident', 0) ], [ EFunctionDef (Just ss) ident' [] erl ] )
-        effFnArity = uncurriedFnArity' (ModuleName [ ProperName "Effect", ProperName "Uncurried" ]) "EffectFn" qident
-        fnArity = uncurriedFnArity' (ModuleName [ ProperName "Data", ProperName "Function", ProperName "Uncurried" ]) "Fn" qident
-    uncurried <- case fromMaybe 0 (M.lookup qident arities) of
-          _ | Just arity <- effFnArity <|> fnArity -> do
-            avars <- vars arity
-            pure ( [ (ident', arity) ], [ EFunctionDef (Just ss) ident' avars $ EApp erl (map EVar avars) ] )
-          0 -> pure ( [], [] )
-          arity -> do
-            avars <- vars arity
-            pure ( [ (ident', arity) ], [ EFunctionDef (Just ss) ident' avars $ curriedApp (map EVar avars) erl ] )
+    -- Always generate the plain curried form, f x y = ... -~~> f() -> fun (X) -> fun (Y) -> ... end end.
+    erl <- valueToErl val
+    let curried = ( [ (ident', 0) ], [ EFunctionDef (Just ss) ident' [] erl ] )
+
+    -- For effective > 0 (either plain curried funs, FnX or EffectFnX) generate an uncurried overload
+    -- f x y = ... -~~> f(X,Y) -> ((...)(X))(Y).
+    -- Relying on inlining to clean up some junk here
+    let mkRunApp modName prefix n = App eann (Var eann (Qualified (Just modName) (Ident $ prefix <> T.pack (show n))))
+        (wrap, unwrap) = case effFnArity qident of
+          Just n -> (mkRunApp effectUncurried C.runEffectFn n, \e -> EApp e [])
+          _ | Just n <- fnArity qident -> (mkRunApp dataFunctionUncurried C.runFn n, id)
+          _ -> (id, id)
+
+    uncurried <- case effFnArity qident <|> fnArity qident <|> M.lookup qident arities of
+      Just arity | arity > 0 -> do
+        vars <- replicateM arity freshNameErl
+        -- Apply in CoreFn then translate to take advantage of translation of full/partial application
+        erl' <- valueToErl $ foldl (\fn a -> App eann fn (Var eann (Qualified Nothing (Ident a)))) (wrap val) vars
+        pure ( [ (ident', arity) ], [ EFunctionDef (Just ss) ident' vars (unwrap erl') ] )
+      _ -> pure ([], [])
+
     let res = curried <> uncurried
-    pure $ case ident `Set.member` declaredExportsSet of
-      True -> res
-      False -> ([], snd res)
-      
+    pure $ if ident `Set.member` declaredExportsSet 
+            then res
+            else ([], snd res)
 
   bindToErl :: Bind Ann -> m [Erl]
   bindToErl (NonRec _ ident val) =
@@ -226,8 +241,9 @@ moduleToErl env (Module _ _ mn _ _ declaredExports foreigns decls) foreignExport
   qualifiedToErl' mn' moduleType ident = Atom (Just $ atomModuleName mn' moduleType) (runIdent ident)
 
   -- Top level definitions are everywhere fully qualified, variables are not.
-  qualifiedToErl (Qualified (Just mn') ident) | mn == mn' = Atom Nothing (runIdent ident)
-  qualifiedToErl (Qualified (Just mn') ident) = qualifiedToErl' mn' PureScriptModule ident
+  qualifiedToErl (Qualified (Just mn') ident) | mn == mn' && ident `Set.notMember` declaredExportsSet  =
+    Atom Nothing (runIdent ident) -- Local reference to local non-exported function
+  qualifiedToErl (Qualified (Just mn') ident) = qualifiedToErl' mn' PureScriptModule ident -- Reference other modules or exported things via module name
   qualifiedToErl _ = error "Invalid qualified identifier"
 
   qualifiedToVar (Qualified _ ident) = identToVar ident
@@ -240,7 +256,13 @@ moduleToErl env (Module _ _ mn _ _ declaredExports foreigns decls) foreignExport
     rethrowWithPosition pos $ literalToValueErl l
   valueToErl' _ (Var _ (Qualified (Just (ModuleName [ProperName prim])) (Ident undef))) | prim == C.prim, undef == C.undefined =
     return $ EAtomLiteral $ Atom Nothing C.undefined
-  valueToErl' _ (Var _ ident) | isTopLevelBinding ident = return $ EApp (EAtomLiteral $ qualifiedToErl ident) []
+  valueToErl' _ (Var _ ident) | isTopLevelBinding ident = pure $
+    case M.lookup ident arities of
+      Just 1 -> EFunRef (qualifiedToErl ident) 1
+      _ | Just arity <- effFnArity ident <|> fnArity ident
+        , arity > 0 -> EFunRef (qualifiedToErl ident) arity 
+      _ -> EApp (EAtomLiteral $ qualifiedToErl ident) []
+
   valueToErl' _ (Var _ ident) = return $ EVar $ qualifiedToVar ident
 
   valueToErl' ident (Abs _ arg val) = do
