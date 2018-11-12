@@ -10,7 +10,7 @@ import Language.PureScript.CodeGen.Erl.AST
 import Language.PureScript.CodeGen.Erl.Common (atomPS)
 
 import Control.Monad (when, (<=<))
-import Control.Monad.State (State, put, modify,gets, runState, evalStateT, MonadState(..), StateT)
+import Control.Monad.State (State, put, modify,gets, get, runState, evalStateT, evalState, MonadState(..), StateT)
 import Control.Monad.Supply.Class (MonadSupply(..))
 import Data.Monoid
 import qualified Data.Text as T
@@ -76,11 +76,22 @@ isRebound x =
   isVar (EVar _) = True
   isVar _ = False
 
+-- Note blindly replaces under binders, assumes no shadowing
 replaceIdents :: [(Text, Erl)] -> Erl -> Erl
-replaceIdents vars = everywhereOnErl replace
+replaceIdents ovars e = evalState (everywhereOnErlTopDownMThen replace e) ovars
   where
-  replace v@(EVar var) = fromMaybe v $ lookup var vars
-  replace other = other
+  p x = pure (x, pure)
+
+  replace :: Erl -> State [(Text, Erl)] (Erl, Erl -> State [(Text, Erl)] Erl)
+  replace v@(EVar var) = gets (fromMaybe v . lookup var) >>= p
+      -- p $ fromMaybe v $ lookup var vars
+  -- Restrcited, everywhereOnErlTopDownMThen doesn't express context properly
+  replace f@(EFunFull _ [(EFunBinder binds _, _)]) = do
+      vars <- get
+      put $ filter (\(var, _) -> any (occurs var) binds) vars
+      pure (f, \ee -> put vars >> pure ee)
+
+  replace other = p other
 
 -- Rename bound vars in preparation for hoisting expression into a parent scope when the expression may bind same variables as a sibling
 -- Super restricted, only renames top level X = e bindings (possibly in a begin/end block) as this is what we generate

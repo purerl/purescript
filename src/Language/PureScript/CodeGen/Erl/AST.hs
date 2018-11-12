@@ -301,3 +301,31 @@ everywhereOnErlTopDownM f = f >=> go
   go (ECaseOf e binds) = ECaseOf <$> f' e <*> fargs binds
   go (EArrayLiteral es) = EArrayLiteral <$> traverse f' es
   go other = f other
+
+-- Sorry. Really want a type that allows "child context" under binders etc
+everywhereOnErlTopDownMThen :: forall m. (Monad m) => (Erl -> m (Erl, Erl -> m Erl)) -> Erl -> m Erl
+everywhereOnErlTopDownMThen f = f'
+  where
+  f' e = do
+    (x, f1) <- f e
+    y <- go x
+    f1 y
+
+  fargs :: [(x, Erl)] -> m [(x, Erl)]
+  fargs = traverse (sequence . second f')
+
+  go (EUnary op e) = EUnary op <$> f' e
+  go (EBinary op e1 e2) = EBinary op <$> f' e1 <*> f' e2
+  go (EFunctionDef ssann a ss e) = EFunctionDef ssann a ss <$> f' e
+  go (EVarBind x e) = EVarBind x <$> f' e
+  go (EFunFull fname args) = EFunFull fname <$> fargs args
+  go (EApp e es) = EApp <$> f' e <*> traverse f' es
+  go (EBlock es) = EBlock <$> traverse f' es
+  go (ETupleLiteral es) = ETupleLiteral <$> traverse f' es
+  go (EMapLiteral binds) = EMapLiteral <$> fargs binds
+  go (EMapPattern binds) = EMapPattern <$> fargs binds
+  go (EMapUpdate e binds) = EMapUpdate <$> f' e <*> fargs binds
+  go (ECaseOf e binds) = ECaseOf <$> f' e <*> fargs binds
+  go (EArrayLiteral es) = EArrayLiteral <$> traverse f' es
+  go other = fst <$> f other
+  
