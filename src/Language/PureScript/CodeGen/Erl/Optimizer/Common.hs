@@ -9,8 +9,13 @@ import Language.PureScript.PSString (PSString)
 import Language.PureScript.CodeGen.Erl.AST
 import Language.PureScript.CodeGen.Erl.Common (atomPS)
 
-import Control.Monad (when)
-import Control.Monad.State (State, put, runState)
+import Control.Monad (when, (<=<))
+import Control.Monad.State (State, put, modify,gets, runState, evalStateT, MonadState(..), StateT)
+import Control.Monad.Supply.Class (MonadSupply(..))
+import Data.Monoid
+import qualified Data.Text as T
+
+
 
 isFn :: (Text, Text) -> Erl -> Bool
 isFn (moduleName, fnName) (EApp (EAtomLiteral (Atom (Just x) y)) []) =
@@ -30,6 +35,9 @@ isCurriedFn = isDict
 
 applyAll :: [a -> a] -> a -> a
 applyAll = foldl1 (.)
+
+applyAllM :: Monad m => [a -> m a] -> a -> m a
+applyAllM = foldl1 (<=<)
 
 -- Check if var x occurs in expression
 occurs :: Text -> Erl -> Bool
@@ -73,3 +81,20 @@ replaceIdents vars = everywhereOnErl replace
   where
   replace v@(EVar var) = fromMaybe v $ lookup var vars
   replace other = other
+
+-- Rename bound vars in preparation for hoisting expression into a parent scope when the expression may bind same variables as a sibling
+-- Super restricted, only renames top level X = e bindings (possibly in a begin/end block) as this is what we generate
+-- For general code would have to go down
+renameBoundVars :: MonadSupply m => Erl -> m Erl
+renameBoundVars = (`evalStateT` []) . go where
+  go :: MonadSupply m => Erl -> StateT [(Text, Erl)] m Erl
+  go (EVarBind x e) = do
+    n <- fresh
+    let x' = x <> "@" <> T.pack (show n)
+    modify ((x,EVar x'):)
+    EVarBind x' <$> gets (`replaceIdents` e)
+  go (EBlock es) = EBlock <$> traverse go es
+  go e = gets (`replaceIdents` e)
+
+
+

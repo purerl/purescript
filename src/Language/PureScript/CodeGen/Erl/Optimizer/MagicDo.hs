@@ -59,5 +59,5 @@ magicDo'' effectModule C.EffectDictionaries{..} = everywhereOnErl undo . everywh
 
   -- Remove __do function applications which remain after desugaring
   undo :: Erl -> Erl
-  undo (EApp (EFun0 (Just ident) body) []) | ident == fnName = body
+  undo (EApp (EFun0 (Just ident) body) []) | ident == fnName = body -- TODO renameBoundVars  ?
   undo other = other

@@ -23,22 +23,23 @@ import Language.PureScript.CodeGen.Erl.AST
 import Language.PureScript.CodeGen.Erl.Optimizer.Common
 import qualified Language.PureScript.Constants as C
 import qualified Language.PureScript.CodeGen.Erl.Constants as EC
+import Control.Monad.Supply.Class (MonadSupply)
 
 shouldInline :: Erl -> Bool
 shouldInline (EVar _) = True
 shouldInline _ = False
 
-etaConvert :: Erl -> Erl
-etaConvert = everywhereOnErl convert
+etaConvert :: MonadSupply m => Erl -> m Erl
+etaConvert = everywhereOnErlTopDownM convert
   where
-    convert :: Erl -> Erl
+    convert :: MonadSupply m => Erl -> m Erl
     -- TODO ported from JS, but this seems to be beta-reduction and the iife below is eta...?
     convert (EApp (EFunN _ xs e) args)
       | all shouldInline args
       , xs `disjoint` mapMaybe unEVar args
       , all (not . flip isRebound e) xs
-      , all (not . flip isReboundE e) args = replaceIdents (zip xs args) e
-    convert e = e
+      , all (not . flip isReboundE e) args = renameBoundVars $ replaceIdents (zip xs args) e
+    convert e = pure e
 
     unEVar (EVar x) = Just x
     unEVar _ = Nothing
@@ -52,6 +53,7 @@ etaConvert = everywhereOnErl convert
     isReboundE (EVar x) e = isRebound x e
     isReboundE _ _ = False
 
+-- TODO: That's not iifes
 -- -- fun (X) -> fun {body} end(X) end  --> fun {body} end
 evaluateIifes :: Erl -> Erl
 evaluateIifes = everywhereOnErl convert

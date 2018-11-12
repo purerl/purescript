@@ -310,6 +310,7 @@ moduleToErl env (Module _ _ mn _ _ declaredExports foreigns decls) foreignExport
     ds' <- concat <$> mapM bindToErl ds
     ret <- valueToErl val
     -- TODO: Rename variables rather than creating temporary scope just for this
+    -- TODO: This scope doesn't really work probably if we actually want to shadow parent scope (avoiding siblings is fine)
     return $ iife (ds' ++ [ret])
 
   valueToErl' _ (Constructor (_, _, _, Just IsNewtype) _ _ _) = error "newtype ctor"
