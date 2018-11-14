@@ -10,7 +10,7 @@ import Language.PureScript.CodeGen.Erl.AST
 import Language.PureScript.CodeGen.Erl.Common (atomPS)
 
 import Control.Monad (when, (<=<))
-import Control.Monad.State (State, put, modify,gets, get, runState, evalStateT, evalState, MonadState(..), StateT)
+import Control.Monad.State (State, put, modify, gets, runState, evalStateT, MonadState(..), StateT)
 import Control.Monad.Supply.Class (MonadSupply(..))
 import Control.Arrow (second)
 import Data.Monoid
