@@ -12,6 +12,7 @@ import Language.PureScript.CodeGen.Erl.Common (atomPS)
 import Control.Monad (when, (<=<))
 import Control.Monad.State (State, put, modify,gets, get, runState, evalStateT, evalState, MonadState(..), StateT)
 import Control.Monad.Supply.Class (MonadSupply(..))
+import Control.Arrow (second)
 import Data.Monoid
 import qualified Data.Text as T
 
@@ -76,22 +77,42 @@ isRebound x =
   isVar (EVar _) = True
   isVar _ = False
 
--- Note blindly replaces under binders, assumes no shadowing
+-- TODO figure this into generic traversal with context pattern
 replaceIdents :: [(Text, Erl)] -> Erl -> Erl
-replaceIdents ovars e = evalState (everywhereOnErlTopDownMThen replace e) ovars
-  where
-  p x = pure (x, pure)
+replaceIdents vars = go where
+  -- Placeholder
+  f :: Erl -> Erl
+  f = id
 
-  replace :: Erl -> State [(Text, Erl)] (Erl, Erl -> State [(Text, Erl)] Erl)
-  replace v@(EVar var) = gets (fromMaybe v . lookup var) >>= p
-      -- p $ fromMaybe v $ lookup var vars
-  -- Restrcited, everywhereOnErlTopDownMThen doesn't express context properly
-  replace f@(EFunFull _ [(EFunBinder binds _, _)]) = do
-      vars <- get
-      put $ filter (\(var, _) -> any (occurs var) binds) vars
-      pure (f, \ee -> put vars >> pure ee)
+  go :: Erl -> Erl
+  go (EFunFull fname args) = f $ EFunFull fname $ map goFunHead args
+  go (ECaseOf e binds) = f $ ECaseOf (go e) $ map goCase binds
 
-  replace other = p other
+  go (EUnary op e) = f $ EUnary op (go e)
+  go (EBinary op e1 e2) = f $ EBinary op (go e1) (go e2)
+  go (EFunctionDef ssann a ss e) = f $ EFunctionDef ssann a ss (go e)
+  go (EVarBind x e) = f $ EVarBind x (go e)
+  go (EApp e es) = f $ EApp (go e) (map go es)
+  go (EBlock es) = f $ EBlock (map go es)
+  go (ETupleLiteral es) = f $ ETupleLiteral (map go es)
+  go (EMapLiteral binds) = f $ EMapLiteral $ map (second go) binds
+  go (EMapPattern binds) = f $ EMapPattern $ map (second go) binds
+  go (EMapUpdate e binds) = f $ EMapUpdate (go e) $ map (second go) binds
+  go (EArrayLiteral es) = f $ EArrayLiteral (map go es)
+  go v@(EVar var) = fromMaybe v $ lookup var vars
+  go other = other
+
+  -- -- Vars are *not* fresh inf case binders
+  goCase :: (EBinder, Erl) -> (EBinder, Erl)
+  goCase (EBinder e, e') = (EBinder (go e), go e')
+  goCase (EGuardedBinder e (Guard eg), e') = (EGuardedBinder (go e) (Guard $ go eg), go e')
+
+  goFunHead :: (EFunBinder, Erl) -> (EFunBinder, Erl)
+  goFunHead ((EFunBinder es g), e) = ((EFunBinder es g'), replaceIdents vars' e)
+    where
+      -- *Don't* replace in es, any vars in there are by definition fresh - and we just filtered them out
+      vars' = filter (\(var, _) -> not $ any (occurs var) es) vars
+      g' = maybe Nothing (\(Guard eg) -> Just $ Guard $ replaceIdents vars' eg) g
 
 -- Rename bound vars in preparation for hoisting expression into a parent scope when the expression may bind same variables as a sibling
 -- Super restricted, only renames top level X = e bindings (possibly in a begin/end block) as this is what we generate

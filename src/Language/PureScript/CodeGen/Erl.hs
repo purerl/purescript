@@ -39,6 +39,7 @@ import Language.PureScript.Types
 import Language.PureScript.Environment as E
 import qualified Language.PureScript.Constants as C
 import Language.PureScript.Traversals (sndM)
+import Language.PureScript.AST (SourceSpan, nullSourceSpan)
 
 import Language.PureScript.CodeGen.Erl.Common
 import Language.PureScript.CodeGen.Erl.Optimizer
@@ -142,10 +143,10 @@ moduleToErl env (Module _ _ mn _ _ declaredExports foreigns decls) foreignExport
     let body = EApp (EAtomLiteral $ qualifiedToErl' mn ForeignModule ident) (take arity $ map EVar args)
         body' = curriedApp (drop arity $ map EVar args) body
         fun = curriedLambda body' args
-        name = Atom Nothing $ identToAtomName ident
-    pure $ ([ (name, fullArity) ], [ EFunctionDef Nothing name args body' ])
-      <> if fullArity == 0 then ( [], [] )
-         else ([(name, 0)], [EFunctionDef Nothing name [] fun])
+    fident <- fmap (Ident . ("f" <>) . T.pack . show) fresh
+    let var = Qualified Nothing fident
+        wrap e = EBlock [ EVarBind (identToVar fident) fun, e ]
+    generateFunctionOverloads Nothing (ssAnn nullSourceSpan) ident (Atom Nothing $ runIdent ident) (Var (ssAnn nullSourceSpan) var) wrap
 
   curriedLambda :: Erl -> [T.Text] -> Erl
   curriedLambda = foldr (EFun1 Nothing)
@@ -184,12 +185,16 @@ moduleToErl env (Module _ _ mn _ _ declaredExports foreigns decls) foreignExport
         ident' = case meta' of
           Just IsTypeClassConstructor -> identToTypeclassCtor ident
           _ -> Atom Nothing $ runIdent ident
-        qident = Qualified (Just mn) ident
+        
 
+    generateFunctionOverloads (Just ss) eann ident ident' val id
+
+  generateFunctionOverloads :: Maybe SourceSpan -> Ann -> Ident -> Atom -> Expr Ann -> (Erl -> Erl)  -> m ([(Atom,Int)], [ Erl ])
+  generateFunctionOverloads ss eann ident ident' val outerWrapper = do
     -- Always generate the plain curried form, f x y = ... -~~> f() -> fun (X) -> fun (Y) -> ... end end.
+    let qident = Qualified (Just mn) ident
     erl <- valueToErl val
-    let curried = ( [ (ident', 0) ], [ EFunctionDef (Just ss) ident' [] erl ] )
-
+    let curried = ( [ (ident', 0) ], [ EFunctionDef ss ident' [] (outerWrapper erl) ] )
     -- For effective > 0 (either plain curried funs, FnX or EffectFnX) generate an uncurried overload
     -- f x y = ... -~~> f(X,Y) -> ((...)(X))(Y).
     -- Relying on inlining to clean up some junk here
@@ -204,7 +209,7 @@ moduleToErl env (Module _ _ mn _ _ declaredExports foreigns decls) foreignExport
         vars <- replicateM arity freshNameErl
         -- Apply in CoreFn then translate to take advantage of translation of full/partial application
         erl' <- valueToErl $ foldl (\fn a -> App eann fn (Var eann (Qualified Nothing (Ident a)))) (wrap val) vars
-        pure ( [ (ident', arity) ], [ EFunctionDef (Just ss) ident' vars (unwrap erl') ] )
+        pure ( [ (ident', arity) ], [ EFunctionDef ss ident' vars (outerWrapper (unwrap erl')) ] )
       _ -> pure ([], [])
 
     let res = curried <> uncurried
