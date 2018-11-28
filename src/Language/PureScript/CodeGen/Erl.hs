@@ -15,7 +15,6 @@ import Language.PureScript.CodeGen.Erl.AST as AST
 import qualified Data.Text as T
 import Data.Traversable
 import Data.Foldable
-import Data.Monoid
 import Control.Monad (unless, replicateM)
 
 import qualified Data.Set as Set

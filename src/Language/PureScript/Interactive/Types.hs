@@ -3,6 +3,7 @@
 --
 module Language.PureScript.Interactive.Types
   ( PSCiConfig(..)
+  , psciEnvironment
   , PSCiState -- constructor is not exported, to prevent psciImports and psciExports from
               -- becoming inconsistent with importedModules, letBindings and loadedExterns
   , ImportedModule
@@ -30,6 +31,7 @@ import Prelude.Compat
 
 import qualified Language.PureScript as P
 import qualified Data.Map as M
+import           Data.List (foldl')
 import           Language.PureScript.Sugar.Names.Env (nullImports, primExports)
 import           Control.Monad.Trans.Except (runExceptT)
 import           Control.Monad.Writer.Strict (runWriterT)
@@ -40,9 +42,8 @@ import           Control.Monad.Writer.Strict (runWriterT)
 -- These configuration values do not change during execution.
 --
 data PSCiConfig = PSCiConfig
-  { psciFileGlobs           :: [String]
-  , psciEnvironment         :: P.Environment
-  , psciBuildOptions        :: P.Options
+  { psciFileGlobs    :: [String]
+  , psciBuildOptions :: P.Options
   } deriving Show
 
 -- | The PSCI state.
@@ -79,6 +80,10 @@ psciExports (PSCiState _ _ _ _ x) = x
 
 initialPSCiState :: PSCiState
 initialPSCiState = PSCiState [] [] [] nullImports primExports
+
+psciEnvironment :: PSCiState -> P.Environment
+psciEnvironment st = foldl' (flip P.applyExternsFileToEnvironment) P.initEnvironment externs
+  where externs = map snd (psciLoadedExterns st)
 
 -- | All of the data that is contained by an ImportDeclaration in the AST.
 -- That is:
@@ -139,7 +144,7 @@ updateImportedModules f (PSCiState x a b c d) =
 -- | Updates the loaded externs files in the state record.
 updateLoadedExterns :: ([(P.Module, P.ExternsFile)] -> [(P.Module, P.ExternsFile)]) -> PSCiState -> PSCiState
 updateLoadedExterns f (PSCiState a b x c d) =
-  PSCiState a b (f x) c d
+  updateImportExports (PSCiState a b (f x) c d)
 
 -- | Updates the let bindings in the state record.
 updateLets :: ([P.Declaration] -> [P.Declaration]) -> PSCiState -> PSCiState

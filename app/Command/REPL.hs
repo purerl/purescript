@@ -31,7 +31,6 @@ import           Control.Monad.Trans.State.Strict (StateT, evalStateT)
 import           Control.Monad.Trans.Reader (ReaderT, runReaderT)
 import           Data.FileEmbed (embedStringFile)
 import           Data.Foldable (for_)
-import           Data.Monoid ((<>))
 import           Data.String (IsString(..))
 import           Data.Text (Text, unpack)
 import           Data.Traversable (for)
@@ -364,19 +363,19 @@ command = loop <$> options
           unless (supportModuleIsDefined (map snd modules)) . liftIO $ do
             putStr supportModuleMessage
             exitFailure
-          (externs, env) <- ExceptT . (runMake buildOpts) . make $ modules
-          return (modules, externs, env)
+          (externs, _) <- ExceptT . (runMake buildOpts) . make $ modules
+          return (modules, externs)
         case psciBackend of
           Backend setup eval reload (shutdown :: state -> IO ()) _ ->
             case e of
               Left errs -> do
                 pwd <- getCurrentDirectory
                 putStrLn (P.prettyPrintMultipleErrors P.defaultPPEOptions {P.ppeRelativeDirectory = pwd} errs) >> exitFailure
-              Right (modules, externs, env) -> do
+              Right (modules, externs) -> do
                 historyFilename <- getHistoryFilename
                 let settings = defaultSettings { historyFile = Just historyFilename }
                     initialState = updateLoadedExterns (const (zip (map snd modules) externs)) initialPSCiState
-                    config = PSCiConfig psciInputGlob env buildOpts
+                    config = PSCiConfig psciInputGlob buildOpts
                     runner = flip runReaderT config
                              . flip evalStateT initialState
                              . runInputT (setComplete completion settings)

@@ -55,10 +55,12 @@ readInput inputFiles = forM inputFiles $ \inputFile -> do
 getSupportModuleTuples :: IO [(FilePath, P.Module)]
 getSupportModuleTuples = do
   cd <- getCurrentDirectory
-  let supportDir = cd </> "tests" </> "support" </> ".psc-package"
-  supportPurs <- Glob.globDir1 (Glob.compile "*/*/*/src/**/*.purs") supportDir
-  supportPursFiles <- readInput supportPurs
-  modules <- runExceptT $ ExceptT . return $ P.parseModulesFromFiles id supportPursFiles
+  let supportDir = cd </> "tests" </> "support" 
+  libraries <- Glob.globDir1 (Glob.compile "*/*/*/src/**/*.purs") (supportDir </> ".psc-package")
+  psciFiles <- Glob.globDir1 (Glob.compile "**/*.purs") (supportDir </> "psci")
+  let pursFiles = psciFiles ++ libraries
+  fileContents <- readInput pursFiles
+  modules <- runExceptT $ ExceptT . return $ P.parseModulesFromFiles id fileContents
   case modules of
     Right ms -> return ms
     Left errs -> fail (P.prettyPrintMultipleErrors P.defaultPPEOptions errs)

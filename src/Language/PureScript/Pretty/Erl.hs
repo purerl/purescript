@@ -15,7 +15,6 @@ import Language.PureScript.Pretty.Common hiding (withIndent)
 import Language.PureScript.PSString
 import Language.PureScript.AST.SourcePos
 
-import Data.Monoid
 import Data.Text (Text)
 import Data.Word (Word16)
 import qualified Data.Text as T

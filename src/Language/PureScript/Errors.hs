@@ -187,7 +187,7 @@ errorCode em = case unwrapErrorMessage em of
 -- | A stack trace for an error
 newtype MultipleErrors = MultipleErrors
   { runMultipleErrors :: [ErrorMessage]
-  } deriving (Show, Monoid)
+  } deriving (Show, Semigroup, Monoid)
 
 -- | Check whether a collection of errors is empty or not.
 nonEmpty :: MultipleErrors -> Bool
@@ -762,8 +762,12 @@ prettyPrintSingleError (PPEOptions codeColor full level showDocs relPath) e = fl
       line $ "Argument list lengths differ in declaration " <> markCode (showIdent ident)
     renderSimpleErrorMessage (OverlappingArgNames ident) =
       line $ "Overlapping names in function/binder" <> foldMap ((" in declaration " <>) . showIdent) ident
-    renderSimpleErrorMessage (MissingClassMember ident) =
-      line $ "Type class member " <> markCode (showIdent ident) <> " has not been implemented."
+    renderSimpleErrorMessage (MissingClassMember identsAndTypes) =
+      paras $ [ line "The following type class members have not been implemented:"
+              , Box.vcat Box.left
+                [ markCodeBox $ Box.text (T.unpack (showIdent ident)) Box.<> " :: " Box.<> typeAsBox ty
+                | (ident, ty) <- NEL.toList identsAndTypes ]
+              ]
     renderSimpleErrorMessage (ExtraneousClassMember ident className) =
       line $ "" <> markCode (showIdent ident) <> " is not a member of type class " <> markCode (showQualified runProperName className)
     renderSimpleErrorMessage (ExpectedType ty kind) =
@@ -1414,6 +1418,8 @@ toTypelevelString (TypeApp (TypeConstructor f) x)
   | f == primSubName C.typeError "Text" = toTypelevelString x
 toTypelevelString (TypeApp (TypeConstructor f) x)
   | f == primSubName C.typeError "Quote" = Just (typeAsBox x)
+toTypelevelString (TypeApp (TypeConstructor f) (TypeLevelString x))
+  | f == primSubName C.typeError "QuoteLabel" = Just . line . prettyPrintLabel . Label $ x
 toTypelevelString (TypeApp (TypeApp (TypeConstructor f) x) ret)
   | f == primSubName C.typeError "Beside" =
     (Box.<>) <$> toTypelevelString x <*> toTypelevelString ret
