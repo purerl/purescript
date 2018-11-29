@@ -13,7 +13,6 @@ import Control.Monad (when, (<=<))
 import Control.Monad.State (State, put, modify, gets, runState, evalStateT, MonadState(..), StateT)
 import Control.Monad.Supply.Class (MonadSupply(..))
 import Control.Arrow (second)
-import Data.Monoid
 import qualified Data.Text as T
 
 
