@@ -237,6 +237,7 @@ buildMakeActions outputDir filePathMap foreigns usePrefix =
                 | otherwise -> return ()
       for_ (mn `M.lookup` foreigns) (readTextFile >=> writeTextFile foreignFile)
     when (S.member Erl codegenTargets) $ do
+      
       let mn = CF.moduleName m
           moduleDir = outputDir </> T.unpack (runModuleName mn)
           foreignFile = moduleDir </> T.unpack (erlModuleName mn ForeignModule) ++ ".erl"
@@ -245,9 +246,9 @@ buildMakeActions outputDir filePathMap foreigns usePrefix =
           | not $ requiresForeign m ->
               tell $ errorMessage $ UnnecessaryFFIModule mn path
           | otherwise -> pure ()
-        Nothing -> do
+        Nothing ->
           when (requiresForeign m) $ throwError . errorMessage $ MissingFFIModule mn
-          for_ (mn `M.lookup` foreigns) (readTextFile >=> writeTextFile foreignFile)
+      for_ (mn `M.lookup` foreigns) (readTextFile >=> writeTextFile foreignFile)
 
   genSourceMap :: String -> String -> Int -> [SMap] -> Make ()
   genSourceMap dir mapFile extraLines mappings = do
