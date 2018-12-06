@@ -42,6 +42,7 @@ import qualified Language.PureScript.Make.BuildPlan as BuildPlan
 import           Language.PureScript.Make.Actions as Actions
 import           Language.PureScript.Make.Monad as Monad
 import qualified Language.PureScript.CoreFn as CF
+import           Language.PureScript.Options (CodegenTarget(..))
 import           System.Directory (doesFileExist)
 import           System.FilePath (replaceExtension)
 
@@ -165,9 +166,12 @@ make ma@MakeActions{..} ms = do
 inferForeignModules
   :: forall m
    . MonadIO m
-  => M.Map ModuleName (Either RebuildPolicy FilePath)
+  => S.Set CodegenTarget
+  -> M.Map ModuleName (Either RebuildPolicy FilePath)
   -> m (M.Map ModuleName FilePath)
-inferForeignModules = inferForeignModules' "erl"
+inferForeignModules codegenTargets =
+  if Erl `elem` codegenTargets then inferForeignModules' "erl"
+  else inferForeignModules' "js"
 
 -- | Infer the module name for a module by looking for the same filename with
 -- a .js extension.

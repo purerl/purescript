@@ -363,7 +363,8 @@ command = loop <$> options
           unless (supportModuleIsDefined (map snd modules)) . liftIO $ do
             putStr supportModuleMessage
             exitFailure
-          (externs, _) <- ExceptT . (runMake buildOpts) . make $ modules
+          let codegenTargets = P.optionsCodegenTargets buildOpts
+          (externs, _) <- ExceptT . (runMake buildOpts) . (make codegenTargets) $ modules
           return (modules, externs)
         case psciBackend of
           Backend setup eval reload (shutdown :: state -> IO ()) _ ->

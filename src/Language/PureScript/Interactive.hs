@@ -74,10 +74,11 @@ rebuild loadedExterns m = do
 
 -- | Build the collection of modules from scratch. This is usually done on startup.
 make
-  :: [(FilePath, P.Module)]
+  :: S.Set P.CodegenTarget
+  -> [(FilePath, P.Module)]
   -> P.Make ([P.ExternsFile], P.Environment)
-make ms = do
-    foreignFiles <- P.inferForeignModules filePathMap
+make targets ms = do
+    foreignFiles <- P.inferForeignModules targets filePathMap
     externs <- P.make (buildActions foreignFiles) (map snd ms)
     return (externs, foldl' (flip P.applyExternsFileToEnvironment) P.initEnvironment externs)
   where
@@ -123,9 +124,10 @@ handleReloadState reload = do
   globs <- asks psciFileGlobs
   files <- liftIO $ concat <$> traverse glob globs
   opts <- asks psciBuildOptions
+  let codegenTargets = P.optionsCodegenTargets opts
   e <- runExceptT $ do
     modules <- ExceptT . liftIO $ loadAllModules files
-    (externs, _) <- ExceptT . liftIO . (runMake opts) . make $ modules
+    (externs, _) <- ExceptT . liftIO . (runMake opts) . (make codegenTargets) $ modules
     return (map snd modules, externs)
   case e of
     Left errs -> printErrors errs

@@ -67,7 +67,8 @@ compile PSCMakeOptions{..} = do
   (makeErrors, makeWarnings) <- runMake pscmOpts $ do
     ms <- P.parseModulesFromFiles id moduleFiles
     let filePathMap = M.fromList $ map (\(fp, P.Module _ _ mn _ _) -> (mn, Right fp)) ms
-    foreigns <- inferForeignModules filePathMap
+    let targets = P.optionsCodegenTargets pscmOpts
+    foreigns <- inferForeignModules targets filePathMap
     let makeActions = buildMakeActions pscmOutputDir filePathMap foreigns pscmUsePrefix
     P.make makeActions (map snd ms)
   printWarningsAndErrors (P.optionsVerboseErrors pscmOpts) pscmJSONErrors makeWarnings makeErrors
