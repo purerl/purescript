@@ -153,7 +153,7 @@ inferForeignModules
   :: MonadIO m
   => [(FilePath, P.Module)]
   -> m (M.Map P.ModuleName FilePath)
-inferForeignModules = P.inferForeignModules . fromList
+inferForeignModules = P.inferForeignModules' "erl" . fromList
   where
     fromList :: [(FilePath, P.Module)] -> M.Map P.ModuleName (Either P.RebuildPolicy FilePath)
     fromList = M.fromList . map ((P.getModuleName *** Right) . swap)

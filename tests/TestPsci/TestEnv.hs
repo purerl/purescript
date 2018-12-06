@@ -19,6 +19,7 @@ import           System.FilePath ((</>), pathSeparator)
 import qualified System.FilePath.Glob as Glob
 import           System.Process (readProcessWithExitCode)
 import           Test.Hspec (shouldBe, Expectation)
+import qualified Data.Set as Set
 
 -- | A monad transformer for handle PSCi actions in tests
 type TestPSCi a = RWST PSCiConfig () PSCiState IO a
@@ -38,7 +39,7 @@ initTestPSCiEnv = do
       print err >> exitFailure
     Right modules -> do
       -- Make modules
-      makeResultOrError <- runMake P.defaultOptions . make $ modules
+      makeResultOrError <- runMake P.defaultOptions . (make $ Set.singleton P.Erl) $ modules
       case makeResultOrError of
         Left errs -> putStrLn (P.prettyPrintMultipleErrors P.defaultPPEOptions errs) >> exitFailure
         Right (externs, _) ->
