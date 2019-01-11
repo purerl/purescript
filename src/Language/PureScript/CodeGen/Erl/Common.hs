@@ -103,7 +103,7 @@ atom s
 data ModuleType = ForeignModule | PureScriptModule
 
 atomModuleName :: ModuleName -> ModuleType -> Text
-atomModuleName mn mt = atom $ erlModuleName mn mt
+atomModuleName mn mt = erlModuleName mn mt
 
 erlModuleName :: ModuleName -> ModuleType -> Text
 erlModuleName (ModuleName pns) moduleType = intercalate "_" ((toAtomName . runProperName) `map` pns) <>
