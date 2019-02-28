@@ -57,21 +57,21 @@ isTopLevelBinding :: Qualified t -> Bool
 isTopLevelBinding (Qualified (Just _) _) = True
 isTopLevelBinding (Qualified Nothing _) = False
 
-tyArity :: Type -> Int
-tyArity (TypeApp (TypeApp fn _) ty) | fn == E.tyFunction = 1 + tyArity ty
-tyArity (ForAll _ ty _) = tyArity ty
-tyArity (ConstrainedType _ ty) = 1 + tyArity ty 
+tyArity :: SourceType -> Int
+tyArity (TypeApp _ (TypeApp _ fn _) ty) | fn == E.tyFunction = 1 + tyArity ty
+tyArity (ForAll _ _ ty _) = tyArity ty
+tyArity (ConstrainedType _ _ ty) = 1 + tyArity ty 
 tyArity _ = 0
 
-uncurriedFnArity :: ModuleName -> T.Text -> Type -> Maybe Int
+uncurriedFnArity :: ModuleName -> T.Text -> SourceType -> Maybe Int
 uncurriedFnArity moduleName fnName = go (-1)
   where
-    go :: Int -> Type -> Maybe Int
-    go n (TypeConstructor (Qualified (Just mn) (ProperName fnN)))
+    go :: Int -> SourceType -> Maybe Int
+    go n (TypeConstructor _ (Qualified (Just mn) (ProperName fnN)))
       | n >= 1, n <= 10, fnN == (fnName <> T.pack (show n)), mn == moduleName
       = Just n
-    go n (TypeApp t1 _) = go (n+1) t1
-    go n (ForAll _ ty _) = go n ty
+    go n (TypeApp _ t1 _) = go (n+1) t1
+    go n (ForAll _ _ ty _) = go n ty
     go _ _ = Nothing
 
 effectUncurried :: ModuleName
@@ -89,7 +89,7 @@ moduleToErl :: forall m .
   => E.Environment
   -> Module Ann
   -> [(T.Text, Int)]
-  -> [(Ident, Type)]
+  -> [(Ident, SourceType)]
   -> m ([T.Text], [Erl])
 moduleToErl env (Module _ _ mn _ _ declaredExports foreigns decls) foreignExports foreignTypes =
   rethrow (addHint (ErrorInModule mn)) $ do
@@ -115,7 +115,7 @@ moduleToErl env (Module _ _ mn _ _ declaredExports foreigns decls) foreignExport
   findAttributes :: [Bind Ann] -> [Erl]
   findAttributes expr = map (uncurry EAttribute) $ mapMaybe getAttribute $ concatMap onBind expr
     where
-      getAttribute (TypeApp (TypeApp (TypeConstructor (Qualified (Just _) (ProperName "Attribute"))) (TypeLevelString a)) (TypeLevelString b))
+      getAttribute (TypeApp _ (TypeApp _ (TypeConstructor _ (Qualified (Just _) (ProperName "Attribute"))) (TypeLevelString _ a)) (TypeLevelString _ b))
         = Just (a,b)
       getAttribute _ = Nothing
 
@@ -128,7 +128,7 @@ moduleToErl env (Module _ _ mn _ _ declaredExports foreigns decls) foreignExport
   biconcat :: [([a], [b])] -> ([a], [b])
   biconcat x = (concatMap fst x, concatMap snd x)
 
-  types :: M.Map (Qualified Ident) Type
+  types :: M.Map (Qualified Ident) SourceType
   types = M.map (\(t, _, _) -> t) $ E.names env
 
   arities :: M.Map (Qualified Ident) Int
@@ -153,7 +153,7 @@ moduleToErl env (Module _ _ mn _ _ declaredExports foreigns decls) foreignExport
   exportArity :: Ident -> Int
   exportArity ident = fromMaybe 0 $ findExport $ runIdent ident
 
-  checkExport :: (Ident, Type) -> m ()
+  checkExport :: (Ident, SourceType) -> m ()
   checkExport (ident, ty) =
     case (findExport (runIdent ident), tyArity ty) of
       (Just m, n) | m > n ->

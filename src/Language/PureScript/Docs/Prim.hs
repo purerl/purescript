@@ -7,6 +7,7 @@ module Language.PureScript.Docs.Prim
   ) where
 
 import Prelude.Compat hiding (fail)
+import Data.Functor (($>))
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Map as Map
@@ -17,6 +18,7 @@ import qualified Language.PureScript as P
 primModules :: [Module]
 primModules =
   [ primDocsModule
+  , primBooleanDocsModule
   , primOrderingDocsModule
   , primRowDocsModule
   , primRowListDocsModule
@@ -27,7 +29,11 @@ primModules =
 primDocsModule :: Module
 primDocsModule = Module
   { modName = P.moduleNameFromString "Prim"
-  , modComments = Just "The Prim module is embedded in the PureScript compiler in order to provide compiler support for certain types &mdash; for example, value literals, or syntax sugar. It is implicitly imported unqualified in every module except those that list it as a qualified import."
+  , modComments = Just $ T.unlines
+      [ "The `Prim` module is embedded in the PureScript compiler in order to provide compiler support for certain types &mdash; for example, value literals, or syntax sugar. It is implicitly imported unqualified in every module except those that list it as a qualified import."
+      , ""
+      , "`Prim` does not include additional built-in types and kinds that are defined deeper in the compiler. For example, row kinds (e.g. `# Type`, which is the kind of types such as `(name :: String, age :: Int)`), Type wildcards (e.g. `f :: _ -> Int`), and Quantified Types. Rather, these are documented in [the PureScript language reference](https://github.com/purescript/documentation/blob/master/language/Types.md)."
+      ]
   , modDeclarations =
       [ function
       , array
@@ -44,10 +50,22 @@ primDocsModule = Module
   , modReExports = []
   }
 
+primBooleanDocsModule :: Module
+primBooleanDocsModule = Module
+  { modName = P.moduleNameFromString "Prim.Boolean"
+  , modComments = Just "The Prim.Boolean module is embedded in the PureScript compiler. Unlike `Prim`, it is not imported implicitly. It contains a type level `Boolean` data structure."
+  , modDeclarations =
+      [ kindBoolean
+      , booleanTrue
+      , booleanFalse
+      ]
+  , modReExports = []
+  }
+
 primOrderingDocsModule :: Module
 primOrderingDocsModule = Module
   { modName = P.moduleNameFromString "Prim.Ordering"
-  , modComments = Just "The Prim.Row module is embedded in the PureScript compiler. Unlike `Prim`, it is not imported implicitly. It contains a type level `Ordering` data structure."
+  , modComments = Just "The Prim.Ordering module is embedded in the PureScript compiler. Unlike `Prim`, it is not imported implicitly. It contains a type level `Ordering` data structure."
   , modDeclarations =
       [ kindOrdering
       , orderingLT
@@ -150,9 +168,10 @@ primKind = primKindOf P.primName
 lookupPrimTypeKindOf
   :: NameGen 'P.TypeName
   -> Text
-  -> P.Kind
-lookupPrimTypeKindOf k = fst . unsafeLookupOf k
+  -> Kind'
+lookupPrimTypeKindOf k = ($> ()) . fst . unsafeLookupOf k
   ( P.primTypes <>
+    P.primBooleanTypes <>
     P.primOrderingTypes <>
     P.primRowTypes <>
     P.primRowListTypes <>
@@ -194,8 +213,8 @@ primClassOf gen title comments = Declaration
   , declInfo =
       let
         tcd = lookupPrimClassOf gen title
-        args = P.typeClassArguments tcd
-        superclasses = P.typeClassSuperclasses tcd
+        args = fmap (fmap (fmap ($> ()))) $ P.typeClassArguments tcd
+        superclasses = fmap ($> ()) $ P.typeClassSuperclasses tcd
         fundeps = convertFundepsToStrings args (P.typeClassDependencies tcd)
       in
         TypeClassDeclaration args superclasses fundeps
@@ -203,8 +222,7 @@ primClassOf gen title comments = Declaration
 
 kindType :: Declaration
 kindType = primKind "Type" $ T.unlines
-  [ "`Type` (also known as `*`) is the kind of all proper types: those that"
-  , "classify value-level terms."
+  [ "`Type` is the kind of all proper types: those that classify value-level terms."
   , "For example the type `Boolean` has kind `Type`; denoted by `Boolean :: Type`."
   ]
 
@@ -328,6 +346,21 @@ partial = primClass "Partial" $ T.unlines
   , "thrown, although it is not safe to assume that this will happen in all"
   , "cases. For more information, see"
   , "[the Partial type class guide](https://github.com/purescript/documentation/blob/master/guides/The-Partial-type-class.md)."
+  ]
+
+kindBoolean :: Declaration
+kindBoolean = primKindOf (P.primSubName "Boolean") "Boolean" $ T.unlines
+  [ "The `Boolean` kind provides True/False types at the type level"
+  ]
+
+booleanTrue :: Declaration
+booleanTrue = primTypeOf (P.primSubName "Boolean") "True" $ T.unlines
+  [ "The 'True' boolean type."
+  ]
+
+booleanFalse :: Declaration
+booleanFalse = primTypeOf (P.primSubName "Boolean") "False" $ T.unlines
+  [ "The 'False' boolean type."
   ]
 
 kindOrdering :: Declaration
@@ -489,4 +522,3 @@ aboveDoc = primTypeOf (P.primSubName "TypeError") "Above" $ T.unlines
   , "For more information, see"
   , "[the Custom Type Errors guide](https://github.com/purescript/documentation/blob/master/guides/Custom-Type-Errors.md)."
   ]
-

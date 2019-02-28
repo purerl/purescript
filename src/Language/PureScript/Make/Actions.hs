@@ -99,7 +99,7 @@ data MakeActions m = MakeActions
   , readExterns :: ModuleName -> m (FilePath, Externs)
   -- ^ Read the externs file for a module as a string and also return the actual
   -- path for the file.
-  , codegen :: CF.Module CF.Ann -> Environment -> [(Ident, Type)] -> Externs -> SupplyT m ()
+  , codegen :: CF.Module CF.Ann -> Environment -> [(Ident, SourceType)] -> Externs -> SupplyT m ()
   -- ^ Run the code generator for the module and write any required output files.
   , ffiCodegen :: CF.Module CF.Ann -> m ()
   -- ^ Check ffi and print it in the output directory.
@@ -153,7 +153,7 @@ buildMakeActions outputDir filePathMap foreigns usePrefix =
     let path = outputDir </> T.unpack (runModuleName mn) </> "externs.json"
     (path, ) <$> readTextFile path
 
-  codegenErl :: CF.Module CF.Ann -> Environment -> Externs -> [(Ident, Type)] -> SupplyT Make ()
+  codegenErl :: CF.Module CF.Ann -> Environment -> Externs -> [(Ident, SourceType)] -> SupplyT Make ()
   codegenErl m env exts foreignTypes = do
     let mn = CF.moduleName m
     foreignExports <- lift $ case mn `M.lookup` foreigns of
@@ -189,7 +189,7 @@ buildMakeActions outputDir filePathMap foreigns usePrefix =
     text <- TE.decodeUtf8 . B.toStrict <$> readTextFile path
     pure $ either (const []) id $ parseFile path text
 
-  codegen :: CF.Module CF.Ann -> Environment -> [(Ident, Type)] -> Externs -> SupplyT Make ()
+  codegen :: CF.Module CF.Ann -> Environment -> [(Ident, SourceType)] -> Externs -> SupplyT Make ()
   codegen m env foreignTypes exts = do
     let mn = CF.moduleName m
     lift $ writeTextFile (outputFilename mn "externs.json") exts
