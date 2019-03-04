@@ -36,9 +36,14 @@ main = do
   heading "Prim documentation test suite"
   TestPrimDocs.main
 
+  heading "IDE test suite"
   ideTests <- TestIde.main
+  heading "compiler test suite"
   compilerTests <- TestCompiler.main
+
+  heading "PSCI test suite"
   psciTests <- TestPsci.main
+  heading "other test suites"
   coreFnTests <- TestCoreFn.main
   docsTests <- TestDocs.main
   publishTests <- TestPscPublish.main

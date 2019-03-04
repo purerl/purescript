@@ -31,8 +31,8 @@ initTestPSCiEnv = do
   -- Load test support packages
   cwd <- getCurrentDirectory
   let supportDir = cwd </> "tests" </> "support"
+  libraries <- Glob.globDir1 (Glob.compile "*/*/*/src/**/*.purs") (supportDir </> ".psc-package")
   psciFiles <- Glob.globDir1 (Glob.compile "**/*.purs") (supportDir </> "psci")
-  libraries <- Glob.globDir1 (Glob.compile "purescript-*/src/**/*.purs") (supportDir </> "bower_components")
   let pursFiles = psciFiles ++ libraries
   modulesOrError <- loadAllModules pursFiles
   case modulesOrError of
