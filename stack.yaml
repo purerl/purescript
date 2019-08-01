@@ -1,8 +1,19 @@
-resolver: lts-12.0
+resolver: lts-13.26
+pvp-bounds: upper
 packages:
 - '.'
 extra-deps:
+- happy-1.19.9
+- language-javascript-0.6.0.13
+- network-3.0.1.1
 nix:
   enable: false
   packages:
   - zlib
+  # Test dependencies
+  - nodejs
+  - nodePackages.npm
+  - nodePackages.bower
+flags:
+  aeson-pretty:
+    lib-only: true

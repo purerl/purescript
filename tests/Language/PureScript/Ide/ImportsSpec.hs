@@ -3,9 +3,10 @@
 module Language.PureScript.Ide.ImportsSpec where
 
 import           Protolude hiding (moduleName)
-import           Data.Maybe                      (fromJust)
+import           Data.Maybe (fromJust)
+import qualified Data.Set as Set
 
-import qualified Language.PureScript             as P
+import qualified Language.PureScript as P
 import           Language.PureScript.Ide.Command as Command
 import           Language.PureScript.Ide.Error
 import           Language.PureScript.Ide.Imports
@@ -48,9 +49,9 @@ syntaxErrorFile =
   ]
 
 testSliceImportSection :: [Text] -> (P.ModuleName, [Text], [Import], [Text])
-testSliceImportSection = fromRight . sliceImportSection
+testSliceImportSection = unsafeFromRight . sliceImportSection
   where
-    fromRight = fromJust . rightToMaybe
+    unsafeFromRight = fromJust . rightToMaybe
 
 withImports :: [Text] -> [Text]
 withImports is =
@@ -71,9 +72,9 @@ spec = do
   describe "determining the importsection" $ do
     let moduleSkeleton imports =
           Right (P.moduleNameFromString "Main", take 1 simpleFile, imports, drop 2 simpleFile)
-    it "slices a file without imports and adds a newline after the module declaration" $
+    it "slices a file without imports" $
       shouldBe (sliceImportSection noImportsFile)
-          (Right (P.moduleNameFromString "Main", take 1 noImportsFile ++ [""], [], drop 1 noImportsFile))
+          (Right (P.moduleNameFromString "Main", take 1 noImportsFile, [], drop 1 noImportsFile))
 
     it "handles a file with syntax errors just fine" $
       shouldBe (sliceImportSection syntaxErrorFile)
@@ -346,11 +347,16 @@ addExplicitImport i =
 
 addExplicitImportFiltered :: Text -> [P.ModuleName] -> Command
 addExplicitImportFiltered i ms =
-  Command.Import ("src" </> "ImportsSpec.purs") Nothing [moduleFilter ms] (Command.AddImportForIdentifier i Nothing)
+  Command.Import ("src" </> "ImportsSpec.purs") Nothing [moduleFilter (Set.fromList ms)] (Command.AddImportForIdentifier i Nothing)
 
 importShouldBe :: [Text] -> [Text] -> Expectation
 importShouldBe res importSection =
-  res `shouldBe` [ "module ImportsSpec where" , ""] ++ importSection ++ [ "" , "myId x = x"]
+  res `shouldBe`
+    [ "module ImportsSpec where" ]
+    ++ (if null importSection then [] else "" : importSection)
+    ++ [ ""
+       , "myId x = x"
+       ]
 
 runIdeLoaded :: Command -> IO (Either IdeError Success)
 runIdeLoaded c = do

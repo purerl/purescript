@@ -10,6 +10,7 @@ import Prelude.Compat
 
 import Test.Tasty
 
+import qualified TestCst
 import qualified TestCompiler
 import qualified TestCoreFn
 import qualified TestDocs
@@ -18,6 +19,7 @@ import qualified TestPrimDocs
 import qualified TestPsci
 import qualified TestIde
 import qualified TestPscPublish
+import qualified TestBundle
 import qualified TestUtils
 
 import System.IO (hSetEncoding, stdout, stderr, utf8)
@@ -33,31 +35,32 @@ main = do
 
   heading "Updating support code"
   TestUtils.updateSupportCode
-  heading "Prim documentation test suite"
-  TestPrimDocs.main
 
-  heading "IDE test suite"
+  cstTests <- TestCst.main
   ideTests <- TestIde.main
   heading "compiler test suite"
   compilerTests <- TestCompiler.main
 
   heading "PSCI test suite"
   psciTests <- TestPsci.main
-  heading "other test suites"
+  pscBundleTests <- TestBundle.main
   coreFnTests <- TestCoreFn.main
   docsTests <- TestDocs.main
+  primDocsTests <- TestPrimDocs.main
   publishTests <- TestPscPublish.main
   hierarchyTests <- TestHierarchy.main
 
   defaultMain $
     testGroup
       "Tests"
-      (if disableErlTests then [ coreFnTests, docsTests, hierarchyTests ] else 
-      [ compilerTests
+      [ cstTests
+      , compilerTests
       , psciTests
+      , pscBundleTests
       , ideTests
       , coreFnTests
       , docsTests
+      , primDocsTests
       , publishTests
       , hierarchyTests
       ])

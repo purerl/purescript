@@ -17,6 +17,7 @@ import           Control.Monad.Supply
 import           Control.Monad.Trans.Class (MonadTrans(..))
 import           Control.Monad.Writer.Class (MonadWriter(..))
 import           Data.Aeson (encode)
+import           Data.Bifunctor (bimap)
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy as LB
 import qualified Data.ByteString.Lazy.UTF8 as LBU8
@@ -37,27 +38,27 @@ import qualified Language.PureScript.Bundle as Bundle
 import qualified Language.PureScript.CodeGen.JS as J
 import           Language.PureScript.CodeGen.JS.Printer
 import qualified Language.PureScript.CodeGen.Erl as E
+import           Language.PureScript.Pretty.Erl
 import qualified Language.PureScript.CoreFn as CF
 import qualified Language.PureScript.CoreFn.ToJSON as CFJ
 import qualified Language.PureScript.CoreImp.AST as Imp
 import           Language.PureScript.Crash
-import           Language.PureScript.Environment
+import qualified Language.PureScript.CST as CST
+import qualified Language.PureScript.Docs.Types as Docs
 import           Language.PureScript.Errors
 import           Language.PureScript.CodeGen.Erl.Common (erlModuleName, atomModuleName, atom, ModuleType(..))
 import           Language.PureScript.Make.Monad
-import           Language.PureScript.Names (runModuleName, ModuleName, Ident)
+import           Language.PureScript.Names
 import           Language.PureScript.Types
 import           Language.PureScript.Options hiding (codegenTargets)
-import qualified Language.PureScript.Parser as PSParser
 import           Language.PureScript.Parser.Erl
 import           Language.PureScript.Pretty.Common (SMap(..))
-import           Language.PureScript.Pretty.Erl
+import qualified Language.PureScript.Environment as Env
 import qualified Paths_purescript as Paths
 import           SourceMap
 import           SourceMap.Types
 import           System.Directory (doesFileExist, getModificationTime, createDirectoryIfMissing, getCurrentDirectory)
 import           System.FilePath ((</>), takeDirectory, makeRelative, splitPath, normalise)
-import qualified Text.Parsec as Parsec
 
 -- | Determines when to rebuild a module
 data RebuildPolicy
@@ -99,7 +100,7 @@ data MakeActions m = MakeActions
   , readExterns :: ModuleName -> m (FilePath, Externs)
   -- ^ Read the externs file for a module as a string and also return the actual
   -- path for the file.
-  , codegen :: CF.Module CF.Ann -> Environment -> [(Ident, SourceType)] -> Externs -> SupplyT m ()
+  , codegen :: CF.Module CF.Ann -> Docs.Module -> Env.Environment -> [(Ident, SourceType)] -> Externs -> SupplyT m ()
   -- ^ Run the code generator for the module and write any required output files.
   , ffiCodegen :: CF.Module CF.Ann -> m ()
   -- ^ Check ffi and print it in the output directory.
@@ -140,6 +141,7 @@ buildMakeActions outputDir filePathMap foreigns usePrefix =
     JSSourceMap -> outputFilename mn "index.js.map"
     Erl -> outputFilename mn $ T.unpack (erlModuleName mn PureScriptModule <> ".erl")
     CoreFn -> outputFilename mn "corefn.json"
+    Docs -> outputFilename mn "docs.json"
 
   getOutputTimestamp :: ModuleName -> Make (Maybe UTCTime)
   getOutputTimestamp mn = do
@@ -153,7 +155,7 @@ buildMakeActions outputDir filePathMap foreigns usePrefix =
     let path = outputDir </> T.unpack (runModuleName mn) </> "externs.json"
     (path, ) <$> readTextFile path
 
-  codegenErl :: CF.Module CF.Ann -> Environment -> Externs -> [(Ident, SourceType)] -> SupplyT Make ()
+  codegenErl :: CF.Module CF.Ann -> Env.Environment -> Externs -> [(Ident, SourceType)] -> SupplyT Make ()
   codegenErl m env exts foreignTypes = do
     let mn = CF.moduleName m
     foreignExports <- lift $ case mn `M.lookup` foreigns of
@@ -189,8 +191,8 @@ buildMakeActions outputDir filePathMap foreigns usePrefix =
     text <- TE.decodeUtf8 . B.toStrict <$> readTextFile path
     pure $ either (const []) id $ parseFile path text
 
-  codegen :: CF.Module CF.Ann -> Environment -> [(Ident, SourceType)] -> Externs -> SupplyT Make ()
-  codegen m env foreignTypes exts = do
+  codegen :: CF.Module CF.Ann -> Docs.Module -> Env.Environment -> [(Ident, SourceType)] -> Externs -> SupplyT Make ()
+  codegen m docs env externTypes exts = do
     let mn = CF.moduleName m
     lift $ writeTextFile (outputFilename mn "externs.json") exts
     codegenTargets <- lift $ asks optionsCodegenTargets
@@ -198,13 +200,13 @@ buildMakeActions outputDir filePathMap foreigns usePrefix =
       let coreFnFile = targetFilename mn CoreFn
           json = CFJ.moduleToJSON Paths.version m
       lift $ writeTextFile coreFnFile (encode json)
-    when (S.member Erl codegenTargets) $ codegenErl m env exts foreignTypes
+    when (S.member Erl codegenTargets) $ codegenErl m env exts externTypes 
     when (S.member JS codegenTargets) $ do
       foreignInclude <- case mn `M.lookup` foreigns of
         Just _
-          | not $ requiresForeign m -> do
+          | not $ requiresForeign m ->
               return Nothing
-          | otherwise -> do
+          | otherwise ->
               return $ Just $ Imp.App Nothing (Imp.Var Nothing "require") [Imp.StringLiteral Nothing "./foreign.js"]
         Nothing | requiresForeign m -> throwError . errorMessage' (CF.moduleSourceSpan m) $ MissingFFIModule mn
                 | otherwise -> return Nothing
@@ -220,6 +222,8 @@ buildMakeActions outputDir filePathMap foreigns usePrefix =
       lift $ do
         writeTextFile jsFile (B.fromStrict $ TE.encodeUtf8 $ js <> mapRef)
         when sourceMaps $ genSourceMap dir mapFile (length prefix) mappings
+    when (S.member Docs codegenTargets) $ do
+      lift $ writeTextFile (outputFilename mn "docs.json") (encode docs)
 
   ffiCodegen :: CF.Module CF.Ann -> Make ()
   ffiCodegen m = do
@@ -344,8 +348,8 @@ checkForeignDecls m path = do
   -- We ignore the error message here, just being told it's an invalid
   -- identifier should be enough.
   parseIdent :: String -> Either String Ident
-  parseIdent str = try (T.pack str)
-    where
-    try s = either (const (Left str)) Right $ do
-      ts <- PSParser.lex "" s
-      PSParser.runTokenParser "" (PSParser.parseIdent <* Parsec.eof) ts
+  parseIdent str =
+    bimap (const str) (Ident . CST.getIdent . CST.nameValue)
+      . CST.runTokenParser CST.parseIdent
+      . CST.lex
+      $ T.pack str

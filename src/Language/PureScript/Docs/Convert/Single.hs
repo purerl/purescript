@@ -11,7 +11,12 @@ import Data.Functor (($>))
 import qualified Data.Text as T
 
 import Language.PureScript.Docs.Types
-import qualified Language.PureScript as P
+
+import qualified Language.PureScript.AST as P
+import qualified Language.PureScript.Comments as P
+import qualified Language.PureScript.Crash as P
+import qualified Language.PureScript.Names as P
+import qualified Language.PureScript.Types as P
 
 -- |
 -- Convert a single Module, but ignore re-exports; any re-exported types or
@@ -122,9 +127,10 @@ convertDeclaration (P.DataDeclaration sa dtype _ args ctors) title =
   Just (Right (mkDeclaration sa title info) { declChildren = children })
   where
   info = DataDeclaration dtype (fmap (fmap (fmap ($> ()))) args)
-  children = map convertCtor (fmap (fmap (fmap ($> ()))) ctors)
-  convertCtor (ctor', tys) =
-    ChildDeclaration (P.runProperName ctor') Nothing Nothing (ChildDataConstructor tys)
+  children = map convertCtor ctors
+  convertCtor :: P.DataConstructorDeclaration -> ChildDeclaration
+  convertCtor P.DataConstructorDeclaration{..} =
+    ChildDeclaration (P.runProperName dataCtorName) (convertComments $ snd dataCtorAnn) Nothing (ChildDataConstructor (fmap (($> ()) . snd) dataCtorFields))
 convertDeclaration (P.ExternDataDeclaration sa _ kind') title =
   basicDeclaration sa title (ExternDataDeclaration (kind' $> ()))
 convertDeclaration (P.ExternKindDeclaration sa _) title =

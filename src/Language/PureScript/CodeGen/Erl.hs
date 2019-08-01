@@ -59,7 +59,7 @@ isTopLevelBinding (Qualified Nothing _) = False
 
 tyArity :: SourceType -> Int
 tyArity (TypeApp _ (TypeApp _ fn _) ty) | fn == E.tyFunction = 1 + tyArity ty
-tyArity (ForAll _ _ ty _) = tyArity ty
+tyArity (ForAll _ _ _ ty _) = tyArity ty
 tyArity (ConstrainedType _ _ ty) = 1 + tyArity ty 
 tyArity _ = 0
 
@@ -71,7 +71,7 @@ uncurriedFnArity moduleName fnName = go (-1)
       | n >= 1, n <= 10, fnN == (fnName <> T.pack (show n)), mn == moduleName
       = Just n
     go n (TypeApp _ t1 _) = go (n+1) t1
-    go n (ForAll _ _ ty _) = go n ty
+    go n (ForAll _ _ _ ty _) = go n ty
     go _ _ = Nothing
 
 effectUncurried :: ModuleName

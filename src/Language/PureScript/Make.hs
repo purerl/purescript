@@ -23,11 +23,14 @@ import           Data.Function (on)
 import           Data.Foldable (for_)
 import           Data.List (foldl', sortBy)
 import qualified Data.List.NonEmpty as NEL
-import           Data.Maybe (fromMaybe)
+import           Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Map as M
 import qualified Data.Set as S
+import qualified Data.Text as T
 import           Language.PureScript.AST
 import           Language.PureScript.Crash
+import qualified Language.PureScript.CST as CST
+import qualified Language.PureScript.Docs.Convert as Docs
 import           Language.PureScript.Environment
 import           Language.PureScript.Errors
 import           Language.PureScript.Externs
@@ -62,8 +65,9 @@ rebuildModule MakeActions{..} externs m@(Module _ _ moduleName _ _) = do
       withPrim = importPrim m
   lint withPrim
   ((Module ss coms _ elaborated exps, env'), nextVar) <- runSupplyT 0 $ do
-    [desugared] <- desugar externs [withPrim]
-    runCheck' (emptyCheckState env) $ typeCheckModule desugared
+    desugar externs [withPrim] >>= \case
+      [desugared] -> runCheck' (emptyCheckState env) $ typeCheckModule desugared
+      _ -> internalError "desugar did not return a singleton"
 
   -- desugar case declarations *after* type- and exhaustiveness checking
   -- since pattern guards introduces cases which the exhaustiveness checker
@@ -78,7 +82,20 @@ rebuildModule MakeActions{..} externs m@(Module _ _ moduleName _ _) = do
       [renamed] = renameInModules [optimized]
       exts = moduleToExternsFile mod' env'
   ffiCodegen renamed
-  evalSupplyT nextVar' . codegen renamed env' externTypes  . encode $ exts
+
+  -- It may seem more obvious to write `docs <- Docs.convertModule m env' here,
+  -- but I have not done so for two reasons:
+  -- 1. This should never fail; any genuine errors in the code should have been
+  -- caught earlier in this function. Therefore if we do fail here it indicates
+  -- a bug in the compiler, which should be reported as such.
+  -- 2. We do not want to perform any extra work generating docs unless the
+  -- user has asked for docs to be generated.
+  let docs = case Docs.convertModule externs env' m of
+               Left errs -> internalError $
+                 "Failed to produce docs for " ++ T.unpack (runModuleName moduleName)
+                 ++ "; details:\n" ++ prettyPrintMultipleErrors defaultPPEOptions errs
+               Right d -> d
+  evalSupplyT nextVar' . codegen renamed docs env' externTypes  . encode $ exts
   return exts
 
 -- | Compiles in "make" mode, compiling each module separately to a @.js@ file and an @externs.json@ file.
@@ -87,34 +104,41 @@ rebuildModule MakeActions{..} externs m@(Module _ _ moduleName _ _) = do
 -- having to typecheck the module again.
 make :: forall m. (Monad m, MonadBaseControl IO m, MonadError MultipleErrors m, MonadWriter MultipleErrors m)
      => MakeActions m
-     -> [Module]
+     -> [CST.PartialResult Module]
      -> m [ExternsFile]
 make ma@MakeActions{..} ms = do
   checkModuleNames
 
-  (sorted, graph) <- sortModules ms
+  (sorted, graph) <- sortModules (moduleSignature . CST.resPartial) ms
 
   buildPlan <- BuildPlan.construct ma (sorted, graph)
 
-  let toBeRebuilt = filter (BuildPlan.needsRebuild buildPlan . getModuleName) sorted
+  let toBeRebuilt = filter (BuildPlan.needsRebuild buildPlan . getModuleName . CST.resPartial) sorted
   for_ toBeRebuilt $ \m -> fork $ do
-    let deps = fromMaybe (internalError "make: module not found in dependency graph.") (lookup (getModuleName m) graph)
-    buildModule buildPlan (importPrim m) (deps `inOrderOf` map getModuleName sorted)
+    let moduleName = getModuleName . CST.resPartial $ m
+    let deps = fromMaybe (internalError "make: module not found in dependency graph.") (lookup moduleName graph)
+    buildModule buildPlan moduleName
+      (spanName . getModuleSourceSpan . CST.resPartial $ m)
+      (importPrim <$> CST.resFull m)
+      (deps `inOrderOf` map (getModuleName . CST.resPartial) sorted)
 
-  -- Wait for all threads to complete, and collect errors.
-  errors <- BuildPlan.collectErrors buildPlan
+  -- Wait for all threads to complete, and collect results (and errors).
+  results <- BuildPlan.collectResults buildPlan
 
   -- All threads have completed, rethrow any caught errors.
+  let errors = mapMaybe buildJobFailure $ M.elems results
   unless (null errors) $ throwError (mconcat errors)
-
-  -- Collect all ExternsFiles
-  results <- BuildPlan.collectResults buildPlan
 
   -- Here we return all the ExternsFile in the ordering of the topological sort,
   -- so they can be folded into an Environment. This result is used in the tests
   -- and in PSCI.
-  let lookupResult mn = fromMaybe (internalError "make: module not found in results") (M.lookup mn results)
-  return (map (lookupResult . getModuleName) sorted)
+  let lookupResult mn =
+        snd
+        . fromMaybe (internalError "make: module's build job did not succeed")
+        . buildJobSuccess
+        . fromMaybe (internalError "make: module not found in results")
+        $ M.lookup mn results
+  return (map (lookupResult . getModuleName . CST.resPartial) sorted)
 
   where
   checkModuleNames :: m ()
@@ -123,18 +147,18 @@ make ma@MakeActions{..} ms = do
   checkNoPrim :: m ()
   checkNoPrim =
     for_ ms $ \m ->
-      let mn = getModuleName m
+      let mn = getModuleName $ CST.resPartial m
       in when (isBuiltinModuleName mn) $
            throwError
-             . errorMessage' (getModuleSourceSpan m)
+             . errorMessage' (getModuleSourceSpan $ CST.resPartial m)
              $ CannotDefinePrimModules mn
 
   checkModuleNamesAreUnique :: m ()
   checkModuleNamesAreUnique =
-    for_ (findDuplicates getModuleName ms) $ \mss ->
+    for_ (findDuplicates (getModuleName . CST.resPartial) ms) $ \mss ->
       throwError . flip foldMap mss $ \ms' ->
-        let mn = getModuleName (NEL.head ms')
-        in errorMessage'' (fmap getModuleSourceSpan ms') $ DuplicateModule mn
+        let mn = getModuleName . CST.resPartial . NEL.head $ ms'
+        in errorMessage'' (fmap (getModuleSourceSpan . CST.resPartial) ms') $ DuplicateModule mn
 
   -- Find all groups of duplicate values in a list based on a projection.
   findDuplicates :: Ord b => (a -> b) -> [a] -> Maybe [NEL.NonEmpty a]
@@ -147,21 +171,22 @@ make ma@MakeActions{..} ms = do
   inOrderOf :: (Ord a) => [a] -> [a] -> [a]
   inOrderOf xs ys = let s = S.fromList xs in filter (`S.member` s) ys
 
-  buildModule :: BuildPlan -> Module -> [ModuleName] -> m ()
-  buildModule buildPlan m@(Module _ _ moduleName _ _) deps = flip catchError (complete Nothing . Just) $ do
-    -- We need to wait for dependencies to be built, before checking if the current
-    -- module should be rebuilt, so the first thing to do is to wait on the
-    -- MVars for the module's dependencies.
-    mexterns <- fmap unzip . sequence <$> traverse (getResult buildPlan) deps
+  buildModule :: BuildPlan -> ModuleName -> FilePath -> Either (NEL.NonEmpty CST.ParserError) Module -> [ModuleName] -> m ()
+  buildModule buildPlan moduleName fp mres deps = do
+    result <- flip catchError (return . BuildJobFailed) $ do
+      m <- CST.unwrapParserError fp mres
+      -- We need to wait for dependencies to be built, before checking if the current
+      -- module should be rebuilt, so the first thing to do is to wait on the
+      -- MVars for the module's dependencies.
+      mexterns <- fmap unzip . sequence <$> traverse (getResult buildPlan) deps
 
-    case mexterns of
-      Just (_, externs) -> do
-        (exts, warnings) <- listen $ rebuildModule ma externs m
-        complete (Just (warnings, exts)) Nothing
-      Nothing -> complete Nothing Nothing
-    where
-    complete :: Maybe (MultipleErrors, ExternsFile) -> Maybe MultipleErrors -> m ()
-    complete = BuildPlan.markComplete buildPlan moduleName
+      case mexterns of
+        Just (_, externs) -> do
+          (exts, warnings) <- listen $ rebuildModule ma externs m
+          return $ BuildJobSucceeded warnings exts
+        Nothing -> return BuildJobSkipped
+
+    BuildPlan.markComplete buildPlan moduleName result
 
 inferForeignModules
   :: forall m
