@@ -20,6 +20,7 @@ import Data.Char (isSpace)
 import Data.Function (on)
 import Data.List (sort, sortBy, stripPrefix, groupBy)
 import qualified Data.Map as M
+import qualified Data.Set as Set
 import qualified Data.Text as T
 import Data.Time.Clock (UTCTime())
 import Data.Tuple (swap)
@@ -214,7 +215,7 @@ inferForeignModules
   :: MonadIO m
   => [(FilePath, P.Module)]
   -> m (M.Map P.ModuleName FilePath)
-inferForeignModules = P.inferForeignModules . fromList
+inferForeignModules = P.inferForeignModules  (Set.singleton P.Erl). fromList
   where
     fromList :: [(FilePath, P.Module)] -> M.Map P.ModuleName (Either P.RebuildPolicy FilePath)
     fromList = M.fromList . map ((P.getModuleName *** Right) . swap)

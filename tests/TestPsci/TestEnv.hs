@@ -41,7 +41,7 @@ initTestPSCiEnv = do
       print err >> exitFailure
     Right modules -> do
       -- Make modules
-      makeResultOrError <- runMake .P.defaultOptions  make $ fmap CST.pureResult <$> modules
+      makeResultOrError <- runMake P.defaultOptions . make (Set.singleton P.Erl) $ fmap CST.pureResult <$> modules
       case makeResultOrError of
         Left errs -> putStrLn (P.prettyPrintMultipleErrors P.defaultPPEOptions errs) >> exitFailure
         Right (externs, _) ->

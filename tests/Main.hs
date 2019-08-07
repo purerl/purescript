@@ -63,7 +63,7 @@ main = do
       , primDocsTests
       , publishTests
       , hierarchyTests
-      ])
+      ]
 
   where
   heading msg = do
