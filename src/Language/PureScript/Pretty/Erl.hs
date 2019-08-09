@@ -1,4 +1,6 @@
-module Language.PureScript.Pretty.Erl where
+module Language.PureScript.Pretty.Erl (
+  prettyPrintErl  
+) where
 
 import Prelude ()
 import Prelude.Compat
@@ -11,7 +13,6 @@ import qualified Control.Arrow as A
 import Language.PureScript.Crash
 import Language.PureScript.CodeGen.Erl.AST
 import Language.PureScript.CodeGen.Erl.Common
-import Language.PureScript.Pretty.Common hiding (withIndent)
 import Language.PureScript.PSString
 import Language.PureScript.AST.SourcePos
 
@@ -20,8 +21,25 @@ import Data.Word (Word16)
 import qualified Data.Text as T
 import Data.Maybe (fromMaybe)
 
+import Language.PureScript.Pretty.Common (Emit, emit, intercalate, parensPos, runPlainString)
+
+data PrinterState = PrinterState { indent :: Int, transformFilename :: String -> String }
+
 withIndent :: StateT PrinterState Maybe gen -> StateT PrinterState Maybe gen
 withIndent = withIndent' 2
+
+withIndent' :: Int -> StateT PrinterState Maybe gen -> StateT PrinterState Maybe gen
+withIndent' indentSize action = do
+  modify $ \st -> st { indent = indent st + indentSize }
+  result <- action
+  modify $ \st -> st { indent = indent st - indentSize }
+  return result
+
+currentIndent :: (Emit gen) => StateT PrinterState Maybe gen
+currentIndent = do
+  current <- get
+  return $ emit $ T.replicate (indent current) " "
+  
 
 literals :: (Emit gen) => Pattern PrinterState Erl gen
 literals = mkPattern' match
@@ -43,8 +61,11 @@ literals = mkPattern' match
 
   match (EFunctionDef ss x xs e) = mconcat <$> sequence (
     (case ss of
-      (Just (SourceSpan { spanName = spanName, spanStart = spanStart })) -> 
-        [ return $ emit $ "-file(\"" <> T.pack spanName <> "\", " <> (T.pack $ show $ sourcePosLine spanStart) <> ").\n" ]
+      (Just SourceSpan { spanName = spanName, spanStart = spanStart }) -> 
+        [ do 
+            t <- transformFilename <$> get
+            return $ emit $ "-file(\"" <> T.pack (t spanName) <> "\", " <> T.pack (show $ sourcePosLine spanStart) <> ").\n"
+        ]
       _ -> [])
     <>
     [ return $ emit $ runAtom x <> "(" <> intercalate "," xs <> ") -> "
@@ -205,9 +226,8 @@ unary' op mkStr = Wrap match (<>)
 unary :: (Emit gen) => UnaryOperator -> Text -> Operator PrinterState Erl gen
 unary op str = unary' op (const str)
 
-prettyPrintErl :: [Erl] -> Text
-prettyPrintErl = maybe (internalError "Incomplete pattern") runPlainString . flip evalStateT (PrinterState 0) . prettyStatements
-
+prettyPrintErl :: (String -> String) -> [Erl] -> Text
+prettyPrintErl transformFilename = maybe (internalError "Incomplete pattern") runPlainString . flip evalStateT (PrinterState 0 transformFilename) . prettyStatements
 
 prettyStatements :: (Emit gen) => [Erl] -> StateT PrinterState Maybe gen
 prettyStatements sts = do

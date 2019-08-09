@@ -167,7 +167,9 @@ buildMakeActions outputDir filePathMap foreigns usePrefix =
         return []
 
     (exports, rawErl) <- E.moduleToErl env m foreignExports foreignTypes
-    let pretty = prettyPrintErl rawErl
+    dir <- lift $ makeIO (const (ErrorMessage [] $ CannotGetFileInfo ".")) getCurrentDirectory
+    let makeAbsFile file = dir </> file
+    let pretty = prettyPrintErl (makeAbsFile :: String -> String) rawErl
     let moduleDir = outputDir </> T.unpack (runModuleName mn)
         outFile = moduleDir </> T.unpack (erlModuleName mn PureScriptModule) ++ ".erl"
         externsFile = moduleDir </> "externs.json"
