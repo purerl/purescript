@@ -28,6 +28,7 @@ import           Control.Monad.Trans.State.Strict (StateT, runStateT, evalStateT
 import           Control.Monad.Writer.Strict (Writer(), runWriter)
 
 import qualified Language.PureScript as P
+import qualified Language.PureScript.CST as CST
 import qualified Language.PureScript.Names as N
 import qualified Language.PureScript.Constants as C
 
@@ -75,7 +76,7 @@ rebuild loadedExterns m = do
 -- | Build the collection of modules from scratch. This is usually done on startup.
 make
   :: S.Set P.CodegenTarget
-  -> [(FilePath, P.Module)]
+  -> [(FilePath, CST.PartialResult P.Module)]
   -> P.Make ([P.ExternsFile], P.Environment)
 make targets ms = do
     foreignFiles <- P.inferForeignModules targets filePathMap
@@ -90,7 +91,7 @@ make targets ms = do
                          False
 
     filePathMap :: M.Map P.ModuleName (Either P.RebuildPolicy FilePath)
-    filePathMap = M.fromList $ map (\(fp, m) -> (P.getModuleName m, Right fp)) ms
+    filePathMap = M.fromList $ map (\(fp, m) -> (P.getModuleName $ CST.resPartial m, Right fp)) ms
 
 -- | Performs a PSCi command
 handleCommand
@@ -129,7 +130,7 @@ handleReloadState reload = do
   let codegenTargets = P.optionsCodegenTargets opts
   e <- runExceptT $ do
     modules <- ExceptT . liftIO $ loadAllModules files
-    (externs, _) <- ExceptT . liftIO . (runMake opts) . (make codegenTargets) $ modules
+    (externs, _) <- ExceptT . liftIO . (runMake opts) . (make codegenTargets) $ fmap CST.pureResult <$> modules
     return (map snd modules, externs)
   case e of
     Left errs -> printErrors errs
@@ -280,7 +281,7 @@ handleTypeOf print' val = do
     Left errs -> printErrors errs
     Right (_, env') ->
       case M.lookup (P.mkQualified (P.Ident "it") temporaryName) (P.names env') of
-        Just (ty, _, _) -> print' . P.prettyPrintType $ ty
+        Just (ty, _, _) -> print' . P.prettyPrintType maxBound $ ty
         Nothing -> print' "Could not find type"
 
 -- | Takes a type and prints its kind
