@@ -90,6 +90,7 @@ install:
 - stack --version
 - stack --no-terminal setup
 - stack path
+- export OS_NAME=$(./ci/convert-os-name.sh)
 - | # Install psc-package
   if test ! -f "$HOME/.local/bin/psc-package"
   then
@@ -99,7 +100,6 @@ install:
     mv psc-package "$HOME/.local/bin/"
   fi
 - npm install -g bower # for psc-docs / psc-publish tests
-- export OS_NAME=$(./ci/convert-os-name.sh)
 - |
   if [ -n "$TRAVIS_TAG" ]
   then
