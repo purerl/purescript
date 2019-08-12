@@ -53,6 +53,7 @@ main = do
   defaultMain $
     testGroup
       "Tests"
+      (if disableErlTests then [ coreFnTests, docsTests, hierarchyTests ] else 
       [ cstTests
       , compilerTests
       , psciTests
@@ -63,7 +64,7 @@ main = do
       , primDocsTests
       , publishTests
       , hierarchyTests
-      ]
+      ])
 
   where
   heading msg = do

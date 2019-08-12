@@ -1,6 +1,6 @@
 {
   "name": "support",
-  "set": "erl-0.12.0-20180719-2",
+  "set": "erl-0.13.2-20190808",
   "source": "https://github.com/purerl/package-sets",
   "depends": [
     "arrays",
