@@ -193,9 +193,6 @@ prettyPrintBlockBody es = do
 prettyPrintStringErl :: PSString -> Text
 prettyPrintStringErl s = "<<" <> utf8Binary s <> ">>"
 
-toChar :: Word16 -> Char
-toChar = toEnum . fromIntegral
-
 app :: (Emit gen) => Pattern PrinterState Erl (gen, Erl)
 app = mkPattern' match
   where
