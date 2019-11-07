@@ -1,8 +1,8 @@
 [![PureScript](logo.png)](http://purescript.org) - Erlang backend
 
-A small strongly typed programming language with expressive types that compiles to JavaScript, written in and inspired by Haskell.
+A small strongly typed programming language with expressive types, written in and inspired by Haskell.
 
-This fork is a PureScript backend targetting Erlang source. The [purerl](https://github.com/purerl) organisation hosts ports of some core libraries.
+The original PureScript project compiles to JavaScript, but this fork is a backend targetting Erlang source. The [purerl](https://github.com/purerl) organisation hosts ports of some core libraries.
 
 To use it, it is recommended to use [psc-package](https://github.com/purescript/psc-package) and the [purerl package sets](https://github.com/purerl/package-sets). In a psc-package project, compile with something like
 ```
