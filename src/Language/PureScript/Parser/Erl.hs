@@ -36,17 +36,24 @@ attributeParser :: String -> P.Parsec Text u a -> P.Parsec Text u a
 attributeParser name valueParser =
   -- PC.char '-' *> PC.string name *> P.between (PC.char '(') (PC.char ')') valueParser
   do
+    PC.spaces
     _ <- PC.char '-'
+    PC.spaces
     _ <- PC.string name
-    res <- P.between (PC.char '(') (PC.char ')') valueParser
+    PC.spaces
+    res <- P.between (PC.char '(' *> PC.spaces) (PC.spaces *> PC.char ')') valueParser
+    PC.spaces
     _ <- PC.char '.'
+    P.skipMany (PC.noneOf ['\n', '\r'])
     pure res
 
 atomArityParser :: P.Parsec Text u (Text, Int)
 atomArityParser = do
   PC.spaces
   a <- atomParser
+  PC.spaces
   _ <- PC.char '/'
+  PC.spaces
   n <- read <$> P.many1 PC.digit
   PC.spaces
   pure (a, n)
