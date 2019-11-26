@@ -20,6 +20,7 @@ import qualified TestPsci
 import qualified TestIde
 import qualified TestPscPublish
 import qualified TestBundle
+import qualified TestMake
 import qualified TestUtils
 
 import System.IO (hSetEncoding, stdout, stderr, utf8)
@@ -40,7 +41,7 @@ main = do
   ideTests <- TestIde.main
   heading "compiler test suite"
   compilerTests <- TestCompiler.main
-
+  makeTests <- TestMake.main
   heading "PSCI test suite"
   psciTests <- TestPsci.main
   pscBundleTests <- TestBundle.main
@@ -56,6 +57,7 @@ main = do
       (if disableErlTests then [ coreFnTests, docsTests, hierarchyTests ] else 
       [ cstTests
       , compilerTests
+      , makeTests
       , psciTests
       , pscBundleTests
       , ideTests

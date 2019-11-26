@@ -178,6 +178,7 @@ lintImports (Module _ _ mn mdecls (Just mexports)) env usedImps = do
       ++ extractByQual mne (importedDataConstructors scope) DctorName
       ++ extractByQual mne (importedValues scope) IdentName
       ++ extractByQual mne (importedValueOps scope) ValOpName
+      ++ extractByQual mne (importedKinds scope) KiName
     where
     go :: (ModuleName, Qualified Name) -> UsedImports -> UsedImports
     go (q, name) = M.alter (Just . maybe [name] (name :)) q
@@ -279,7 +280,7 @@ lintImportDecl env mni qualifierName names ss declType allowImplicit =
           isMatch _ _ = False
 
   unused :: m Bool
-  unused = warn (UnusedImport mni)
+  unused = warn (UnusedImport mni qualifierName)
 
   warn :: SimpleErrorMessage -> m Bool
   warn err = tell (errorMessage' ss err) >> return True
@@ -373,6 +374,7 @@ runDeclRef (ValueOpRef _ op) = Just $ ValOpName op
 runDeclRef (TypeRef _ pn _) = Just $ TyName pn
 runDeclRef (TypeOpRef _ op) = Just $ TyOpName op
 runDeclRef (TypeClassRef _ pn) = Just $ TyClassName pn
+runDeclRef (KindRef _ pn) = Just $ KiName pn
 runDeclRef _ = Nothing
 
 checkDuplicateImports

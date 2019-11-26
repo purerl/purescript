@@ -10,6 +10,7 @@ import           Prelude.Compat
 import           Protolude (ordNub)
 
 import           Control.Arrow ((&&&))
+import           Control.Exception (displayException)
 import           Control.Monad
 import           Control.Monad.Error.Class (MonadError(..))
 import           Control.Monad.Trans.State.Lazy
@@ -86,9 +87,7 @@ errorCode em = case unwrapErrorMessage em of
   UnusedFFIImplementations{} -> "UnusedFFIImplementations"
   InvalidFFIIdentifier{} -> "InvalidFFIIdentifier"
   InvalidFFIArity{} -> "InvalidFFIArity"
-  CannotGetFileInfo{} -> "CannotGetFileInfo"
-  CannotReadFile{} -> "CannotReadFile"
-  CannotWriteFile{} -> "CannotWriteFile"
+  FileIOError{} -> "FileIOError"
   InfiniteType{} -> "InfiniteType"
   InfiniteKind{} -> "InfiniteKind"
   MultipleValueOpFixities{} -> "MultipleValueOpFixities"
@@ -466,17 +465,9 @@ prettyPrintSingleError (PPEOptions codeColor full level showDocs relPath) e = fl
                   else
                     "Make sure the source file exists, and that it has been provided as an input to the compiler."
             ]
-    renderSimpleErrorMessage (CannotGetFileInfo path) =
-      paras [ line "Unable to read file info: "
-            , indent . lineS $ path
-            ]
-    renderSimpleErrorMessage (CannotReadFile path) =
-      paras [ line "Unable to read file: "
-            , indent . lineS $ path
-            ]
-    renderSimpleErrorMessage (CannotWriteFile path) =
-      paras [ line "Unable to write file: "
-            , indent . lineS $ path
+    renderSimpleErrorMessage (FileIOError doWhat err) =
+      paras [ line $ "I/O error while trying to " <> doWhat
+            , indent . lineS $ displayException err
             ]
     renderSimpleErrorMessage (ErrorParsingFFIModule path extra) =
       paras $ [ line "Unable to parse foreign module:"
@@ -906,8 +897,14 @@ prettyPrintSingleError (PPEOptions codeColor full level showDocs relPath) e = fl
       paras [ line "An exhaustivity check was abandoned due to too many possible cases."
             , line "You may want to decompose your data types into smaller types."
             ]
-    renderSimpleErrorMessage (UnusedImport name) =
-      line $ "The import of module " <> markCode (runModuleName name) <> " is redundant"
+
+    renderSimpleErrorMessage (UnusedImport mn qualifier) =
+      let
+        mark = markCode . runModuleName
+        unqualified = "The import of " <> mark mn <> " is redundant"
+        msg' q = "The qualified import of " <> mark mn <> " as " <> mark q <> " is redundant"
+        msg = maybe unqualified msg'
+      in line $ msg qualifier
 
     renderSimpleErrorMessage msg@(UnusedExplicitImport mn names _ _) =
       paras [ line $ "The import of module " <> markCode (runModuleName mn) <> " contains the following unused references:"
@@ -1199,11 +1196,17 @@ prettyPrintSingleError (PPEOptions codeColor full level showDocs relPath) e = fl
     printRow f t = markCodeBox $ indent $ f prettyDepth t
 
     -- If both rows are not empty, print them as diffs
+    -- If verbose print all rows else only print unique rows
     printRows :: Type a -> Type a -> (Box.Box, Box.Box)
-    printRows r1@RCons{} r2@RCons{} = let
-      (sorted1, sorted2) = filterRows (rowToList r1) (rowToList r2)
-      in (printRow typeDiffAsBox sorted1, printRow typeDiffAsBox sorted2)
-    printRows r1 r2 = (printRow typeAsBox r1, printRow typeAsBox r2)
+    printRows r1 r2 = case (full, r1, r2) of 
+      (True, _ , _) -> (printRow typeAsBox r1, printRow typeAsBox r2)
+
+      (_, RCons{}, RCons{}) -> 
+        let (sorted1, sorted2) = filterRows (rowToList r1) (rowToList r2)
+        in (printRow typeDiffAsBox sorted1, printRow typeDiffAsBox sorted2)
+        
+      (_, _, _) -> (printRow typeAsBox r1, printRow typeAsBox r2)
+
 
     -- Keep the unique labels only
     filterRows :: ([RowListItem a], Type a) -> ([RowListItem a], Type a) -> (Type a, Type a)

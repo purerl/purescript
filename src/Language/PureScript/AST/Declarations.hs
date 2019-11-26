@@ -75,9 +75,7 @@ data SimpleErrorMessage
   | MissingFFIImplementations ModuleName [Ident]
   | UnusedFFIImplementations ModuleName [Ident]
   | InvalidFFIIdentifier ModuleName Text
-  | CannotGetFileInfo FilePath
-  | CannotReadFile FilePath
-  | CannotWriteFile FilePath
+  | FileIOError Text IOError -- ^ A description of what we were trying to do, and the error which occurred
   | InfiniteType SourceType
   | InfiniteKind SourceKind
   | MultipleValueOpFixities (OpName 'ValueOpName)
@@ -151,7 +149,7 @@ data SimpleErrorMessage
   | IncompleteExhaustivityCheck
   | MisleadingEmptyTypeImport ModuleName (ProperName 'TypeName)
   | ImportHidingModule ModuleName
-  | UnusedImport ModuleName
+  | UnusedImport ModuleName (Maybe ModuleName)
   | UnusedExplicitImport ModuleName [Name] (Maybe ModuleName) [DeclarationRef]
   | UnusedDctorImport ModuleName (ProperName 'TypeName) (Maybe ModuleName) [DeclarationRef]
   | UnusedDctorExplicitImport ModuleName (ProperName 'TypeName) [ProperName 'ConstructorName] (Maybe ModuleName) [DeclarationRef]
