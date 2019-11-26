@@ -8,6 +8,7 @@ import Prelude.Compat
 
 import qualified Language.PureScript as P
 import qualified Language.PureScript.CST as CST
+import           Language.PureScript.Options (CodegenTarget(..))
 
 import Control.Monad
 import Control.Exception (tryJust)
@@ -179,7 +180,7 @@ compileWithResult input = do
   (makeResult, _) <- P.runMake P.defaultOptions $ do
     ms <- CST.parseModulesFromFiles id moduleFiles
     let filePathMap = M.fromList $ map (\(fp, pm) -> (P.getModuleName $ CST.resPartial pm, Right fp)) ms
-    foreigns <- P.inferForeignModules filePathMap
+    foreigns <- P.inferForeignModules  (Set.singleton Erl) filePathMap
     let makeActions =
           (P.buildMakeActions modulesDir filePathMap foreigns True)
             { P.progress = \(P.CompilingModule mn) ->
