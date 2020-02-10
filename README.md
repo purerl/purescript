@@ -1,3 +1,5 @@
+# Standalone Backend
+
 *Deprecated* - see the standalone `purerl` backend at [purerl/purerl](https://github.com/purerl/purerl)
 
 [![PureScript](logo.png)](http://purescript.org) - Erlang backend
