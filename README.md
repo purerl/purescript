@@ -1,3 +1,5 @@
+*Deprecated* - see the standalone `purerl` backend at [purerl/purerl](https://github.com/purerl/purerl)
+
 [![PureScript](logo.png)](http://purescript.org) - Erlang backend
 
 A small strongly typed programming language with expressive types, written in and inspired by Haskell.
